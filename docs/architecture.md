@@ -50,27 +50,33 @@ FerrisGrid must not be designed as a long-running autonomous runner for normal t
 
 ## 3. System Context
 
-```text
-Human task
-  |
-  v
-External agent runtime / LLM
-  |
-  | calls
-  v
-FerrisGrid CLI or local tool API
-  |
-  +--> observe: capture screen(s), write screenshots, return Markdown
-  |
-  +--> act: parse one action, validate, execute, capture result, return Markdown
-  |
-  +--> recap: human-facing recap/video generation from local session files
+```mermaid
+flowchart TD
+  human[Human task] --> agent[External agent runtime / LLM]
+  agent --> ferris[FerrisGrid CLI or local tool API]
+  ferris --> observe[observe: capture screens, write screenshots, return Markdown]
+  ferris --> act[act: parse one action, validate, execute, capture result]
+  ferris --> recap[recap: generate human-facing recap or video]
+  observe --> session[(Local .ferrisgrid session files)]
+  act --> session
+  session --> recap
 ```
 
 Normal task execution is:
 
-```text
-agent calls observe -> agent analyzes screenshots -> agent calls act -> agent calls observe or act again
+```mermaid
+sequenceDiagram
+  participant Agent as External agent runtime
+  participant FG as FerrisGrid
+  participant Store as .ferrisgrid session
+  Agent->>FG: ferrisgrid observe
+  FG->>Store: write screenshots and metadata
+  FG-->>Agent: compact Markdown with local paths
+  Agent->>Agent: analyze screenshots and choose one action
+  Agent->>FG: ferrisgrid act
+  FG->>FG: parse, validate, policy-check, execute
+  FG->>Store: write action result and post-action frame
+  FG-->>Agent: compact Markdown action result
 ```
 
 FerrisGrid should be safe to call repeatedly from an agent runtime because each command has a narrow, bounded responsibility.
@@ -157,6 +163,23 @@ crates/
   ferrisgrid-agent/
   ferrisgrid-record/
   ferrisgrid-export/
+```
+
+Recommended crate dependency direction:
+
+```mermaid
+flowchart LR
+  cli[ferrisgrid-cli] --> core[ferrisgrid-core]
+  core --> capture[ferrisgrid-capture]
+  core --> input[ferrisgrid-input]
+  core --> agent[ferrisgrid-agent]
+  core --> record[ferrisgrid-record]
+  core --> export[ferrisgrid-export]
+  record --> capture
+  export --> record
+
+  classDef boundary fill:#f7f7f7,stroke:#777,color:#222;
+  class cli,core,capture,input,agent,record,export boundary;
 ```
 
 ### 5.1 `ferrisgrid-cli`
@@ -255,17 +278,17 @@ Responsibilities:
 
 ### 6.1 Observation Flow
 
-```text
-CLI parse
-  -> config load
-  -> session create/resume
-  -> screen discovery
-  -> capture all screens or selected screen
-  -> image processing
-  -> metadata write
-  -> event/metrics write
-  -> compact Markdown response
-  -> exit
+```mermaid
+flowchart TD
+  parse[CLI parse] --> config[Config load]
+  config --> session[Session create or resume]
+  session --> discover[Screen discovery]
+  discover --> capture[Capture all screens or selected screen]
+  capture --> process[Image processing]
+  process --> metadata[Write screenshot metadata]
+  metadata --> traces[Write events and metrics]
+  traces --> response[Return compact Markdown response]
+  response --> exit[Exit]
 ```
 
 Required response shape:
@@ -282,19 +305,19 @@ Required response shape:
 
 ### 6.2 Action Flow
 
-```text
-CLI parse
-  -> config load
-  -> session resume
-  -> parse compact Markdown action
-  -> validate action fields
-  -> validate screen_id and coordinate bounds
-  -> policy gates
-  -> execute one OS input action
-  -> capture post-action screen
-  -> write action/result/events/metrics
-  -> compact Markdown response
-  -> exit
+```mermaid
+flowchart TD
+  parse[CLI parse] --> config[Config load]
+  config --> session[Session resume]
+  session --> action[Parse compact Markdown action]
+  action --> fields[Validate action fields]
+  fields --> coords[Validate screen_id and coordinate bounds]
+  coords --> policy[Policy gates]
+  policy --> execute[Execute one OS input action]
+  execute --> capture[Capture post-action screen]
+  capture --> traces[Write action result, events, and metrics]
+  traces --> response[Return compact Markdown response]
+  response --> exit[Exit]
 ```
 
 Required response shape:
@@ -311,6 +334,16 @@ Required response shape:
 ### 6.3 Ambiguous Multi-Screen Action Flow
 
 If multiple screens are available and the agent omits `screen_id`, FerrisGrid must not guess.
+
+```mermaid
+flowchart TD
+  action[Parse action request] --> screens{Multiple active screens?}
+  screens -- No --> validate[Continue validation]
+  screens -- Yes --> has_id{screen_id provided?}
+  has_id -- Yes --> validate
+  has_id -- No --> reject[Reject with ambiguous_screen]
+  reject --> markdown[Return compact Markdown error with available screens]
+```
 
 Required response shape:
 
@@ -390,6 +423,27 @@ Recommended session structure:
       export/
 ```
 
+Session artifact ownership:
+
+```mermaid
+flowchart TD
+  root[.ferrisgrid/] --> config[config.toml]
+  root --> sessions[sessions/]
+  sessions --> session_id["<session_id>/"]
+  session_id --> manifest[manifest.md]
+  session_id --> snapshot[config.snapshot.toml]
+  session_id --> frames[frames/]
+  session_id --> agent[agent/]
+  session_id --> actions[actions/]
+  session_id --> sequences[sequences/]
+  session_id --> events[events.md]
+  session_id --> metrics[metrics.md]
+  session_id --> export[export/]
+  frames --> screen_frames[screen screenshots and metadata]
+  actions --> action_logs[action requests and results]
+  export --> recap[recap.md and optional video artifacts]
+```
+
 ---
 
 ## 8. Coordinate Mapping
@@ -416,6 +470,17 @@ native_x = screen_origin_x + round((image_x / image_width) * native_width)
 native_y = screen_origin_y + round((image_y / image_height) * native_height)
 ```
 
+Coordinate conversion path:
+
+```mermaid
+flowchart LR
+  agent[Agent coordinates<br/>0..1000 screen-local] --> image[Captured image coordinates]
+  image --> native[Native screen coordinates]
+  native --> os[OS input backend]
+  metadata[Screen metadata<br/>origin, image size, native size, scale factor] --> image
+  metadata --> native
+```
+
 Validation rules:
 
 - Coordinates must be numeric.
@@ -430,8 +495,18 @@ Validation rules:
 
 All actions pass through this chain:
 
-```text
-parse -> semantic validation -> coordinate validation -> screen validation -> policy gate -> execution
+```mermaid
+flowchart LR
+  parse[Parse] --> semantic[Semantic validation]
+  semantic --> coordinates[Coordinate validation]
+  coordinates --> screen[Screen validation]
+  screen --> policy[Policy gate]
+  policy --> execution[Execution]
+  parse -. reject .-> error[Compact Markdown error]
+  semantic -. reject .-> error
+  coordinates -. reject .-> error
+  screen -. reject .-> error
+  policy -. reject .-> error
 ```
 
 MVP policy gates:
@@ -469,6 +544,26 @@ trait PermissionBackend {
 }
 ```
 
+Backend boundary:
+
+```mermaid
+flowchart TD
+  core[ferrisgrid-core] --> capture_trait[CaptureBackend trait]
+  core --> input_trait[InputBackend trait]
+  core --> permission_trait[PermissionBackend trait]
+  capture_trait --> mac_capture[macOS capture]
+  capture_trait --> win_capture[Windows capture]
+  capture_trait --> x11_capture[Linux X11 capture]
+  capture_trait --> wayland_capture[Linux Wayland capture]
+  input_trait --> mac_input[macOS input]
+  input_trait --> win_input[Windows input]
+  input_trait --> x11_input[Linux X11 input]
+  input_trait --> wayland_input[Linux Wayland input]
+  permission_trait --> mac_permissions[macOS permissions]
+  permission_trait --> win_permissions[Windows permissions]
+  permission_trait --> linux_permissions[Linux permissions]
+```
+
 Platform concerns:
 
 - **Windows:** DPI scaling, elevated-window input restrictions, native input APIs.
@@ -481,6 +576,22 @@ Platform concerns:
 ## 11. Documentation Architecture
 
 FerrisGrid documentation should be split by audience and purpose. User-facing docs live under `docs/user-facing/`. Internal, product, roadmap, and implementation docs stay directly under `docs/`.
+
+```mermaid
+flowchart TD
+  docs[docs/] --> internal[Internal and product docs]
+  docs --> user[user-facing/]
+  internal --> prd[prd.md]
+  internal --> architecture[architecture.md]
+  internal --> protocol[protocol.md]
+  internal --> platform[platform-backends.md]
+  internal --> testing[testing.md]
+  user --> overview[overview.md]
+  user --> quickstart[quickstart.md]
+  user --> integration[agent-integration.md]
+  user --> commands[observe.md, act.md, recap.md]
+  user --> operations[sessions.md, privacy.md, troubleshooting.md]
+```
 
 ### 11.1 Internal Documentation
 
