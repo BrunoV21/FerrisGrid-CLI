@@ -94,14 +94,14 @@ Captures current screen state and returns compact Markdown.
 Default behavior:
 
 - Captures all available screens.
-- Writes one screenshot and metadata file per screen.
+- Writes one coordinate-overlay screenshot and metadata file per screen.
 - Returns `screen_id`, image dimensions, native dimensions, coordinate mode, and screenshot path per screen.
 - Exits after the observation is written.
 
 Optional behavior:
 
 - `--screen-id <id>` captures only one screen.
-- `--grid-overlay true` writes grid-overlay screenshots for coordinate debugging.
+- `--grid-overlay false` disables visual grid stamping when metadata-only screenshots are needed.
 
 #### `ferrisgrid act`
 
@@ -220,7 +220,7 @@ Responsibilities:
 - Screen discovery.
 - Stable session-local `screen_id` assignment.
 - Screenshot capture.
-- Optional image resizing, compression, and grid overlay.
+- Optional image resizing and compression; visual grid overlay is enabled by default.
 - Screen metadata collection.
 - Coordinate-space metadata.
 

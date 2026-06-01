@@ -185,7 +185,7 @@ Acceptance criteria:
 - FerrisGrid returns compact Markdown, not JSON.
 - The Markdown includes every saved screenshot path immediately after capture.
 - The Markdown includes native screen dimensions, sent image dimensions, scaling factors, screen ID, timestamp, and coordinate mode for each captured screen.
-- The agent can request a visual grid overlay when needed for coordinate accuracy.
+- Saved screenshots include a visible coordinate grid by default; the agent can disable it only when metadata-only screenshots are explicitly needed.
 
 ### 7.2 Agent action execution
 
@@ -443,7 +443,7 @@ Agent-facing options:
 --grid-overlay false
 ```
 
-`screen_id` is optional. If omitted, `observe` captures every available screen. If provided, `observe` captures only that screen.
+`screen_id` is optional. If omitted, `observe` captures every available screen. If provided, `observe` captures only that screen. The default screenshot includes a visible coordinate grid; `--grid-overlay false` disables visual stamping.
 
 Required local files:
 
@@ -673,7 +673,7 @@ Default behavior:
 - When `screen_id` is provided, capture only that screen.
 - Downscale screenshots before returning paths and metadata to the agent.
 - Use lossy compression by default when acceptable.
-- Avoid visual grid overlay in the image by default if metadata-based coordinates are sufficient.
+- Stamp a visible coordinate grid into returned screenshots by default so the agent can reason from pixels and coordinates together.
 
 Suggested performance targets for MVP:
 
@@ -739,9 +739,24 @@ The image format must be stored in metadata.
 
 FerrisGrid should support two coordinate strategies:
 
+#### Visual overlay grid
+
+Default mode. FerrisGrid renders grid lines and coordinate axes onto the saved screenshot and returns compact Markdown metadata that maps coordinates back to native pixels.
+
+Pros:
+
+- Improves agent coordinate accuracy.
+- Makes screenshot paths self-contained for visual reasoning.
+
+Cons:
+
+- Adds processing latency.
+- Can obscure small UI details.
+- Increases image complexity.
+
 #### Metadata-only grid
 
-Default mode. The agent receives coordinate instructions in compact Markdown, and metadata maps coordinates back to native pixels.
+Optional mode. The agent receives coordinate instructions in compact Markdown, and metadata maps coordinates back to native pixels without stamping the image.
 
 Pros:
 
@@ -753,25 +768,10 @@ Cons:
 
 - The agent may be less precise without visible grid markers.
 
-#### Visual overlay grid
-
-Optional mode. FerrisGrid renders grid lines and coordinate labels onto the image.
-
-Pros:
-
-- May improve agent coordinate accuracy.
-- Useful for debugging.
-
-Cons:
-
-- Adds processing latency.
-- Can obscure UI details.
-- Increases image complexity.
-
 Options:
 
 ```bash
---grid-overlay true
+--grid-overlay false
 --grid-step 100
 --grid-labels true
 --grid-opacity 0.35
@@ -1453,7 +1453,7 @@ resolution_mode = "balanced"
 max_long_side = 1280
 format = "jpg"
 quality = 70
-grid_overlay = false
+grid_overlay = true
 coordinate_mode = "normalized-1000"
 
 [agent]
@@ -2193,7 +2193,7 @@ FerrisGrid is ready for first public release when:
 ## 23. Open questions
 
 1. Should the default agent coordinate system be `0..1000`, `0..100`, or image pixels?
-2. Should visual grid overlay be enabled by default for early users, despite latency and visual noise?
+2. What visual grid density best balances coordinate accuracy against UI readability?
 3. Should action execution default to `policy-gated` or `dry-run` for safety in early releases?
 4. Which image format gives the best speed/quality tradeoff for common agent runtimes?
 5. Should all-screen observation return separate images only, or also an optional stitched virtual-desktop image?

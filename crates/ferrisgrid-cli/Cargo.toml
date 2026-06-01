@@ -1,0 +1,16 @@
+[package]
+name = "ferrisgrid-cli"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "ferrisgrid"
+path = "src/main.rs"
+
+[dependencies]
+ferrisgrid-core = { path = "../ferrisgrid-core" }
+ferrisgrid-capture = { path = "../ferrisgrid-capture" }
+ferrisgrid-input = { path = "../ferrisgrid-input" }
+ferrisgrid-export = { path = "../ferrisgrid-export" }
+

@@ -1,0 +1,9 @@
+[package]
+name = "ferrisgrid-capture"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+ferrisgrid-core = { path = "../ferrisgrid-core" }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }

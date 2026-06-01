@@ -1,0 +1,16 @@
+[workspace]
+members = [
+  "crates/ferrisgrid-cli",
+  "crates/ferrisgrid-core",
+  "crates/ferrisgrid-capture",
+  "crates/ferrisgrid-input",
+  "crates/ferrisgrid-export",
+]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+license = "MIT"
+repository = "https://example.invalid/ferrisgrid"
+
