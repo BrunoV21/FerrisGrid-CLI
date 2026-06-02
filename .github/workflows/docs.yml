@@ -35,8 +35,12 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: docs/official/package-lock.json
+
+      - name: Print docs toolchain
+        run: |
+          node --version
+          npm --version
+          npm pkg get name version private
 
       - name: Install dependencies
         run: npm ci
