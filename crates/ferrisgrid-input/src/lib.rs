@@ -57,12 +57,251 @@ impl InputBackend for MacOsInputBackend {
     }
 }
 
+pub struct LinuxInputBackend;
+
+impl InputBackend for LinuxInputBackend {
+    fn name(&self) -> &'static str {
+        "native-linux-x11"
+    }
+
+    fn capabilities(&self) -> InputCapabilities {
+        InputCapabilities {
+            can_mouse: cfg!(target_os = "linux"),
+            can_keyboard: cfg!(target_os = "linux"),
+        }
+    }
+
+    fn execute(&self, action: &NativeAction) -> Result<InputExecution> {
+        #[cfg(target_os = "linux")]
+        {
+            execute_linux(action)
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = action;
+            Err(FerrisError::new(
+                ErrorKind::Platform,
+                "native Linux X11 input is only available on Linux; use --backend native on this OS or --backend fake",
+            ))
+        }
+    }
+}
+
 pub fn backend_by_name(name: &str) -> Box<dyn InputBackend> {
     match name {
         "fake" => Box::new(FakeInputBackend),
-        "native" | "macos" | "native-macos" => Box::new(MacOsInputBackend),
-        _ => Box::new(MacOsInputBackend),
+        "native" => native_backend(),
+        "macos" | "native-macos" => Box::new(MacOsInputBackend),
+        "linux" | "x11" | "native-linux" | "native-linux-x11" => Box::new(LinuxInputBackend),
+        _ => native_backend(),
     }
+}
+
+fn native_backend() -> Box<dyn InputBackend> {
+    #[cfg(target_os = "linux")]
+    {
+        Box::new(LinuxInputBackend)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        Box::new(MacOsInputBackend)
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        Box::new(MacOsInputBackend)
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn execute_linux(action: &NativeAction) -> Result<InputExecution> {
+    match action {
+        NativeAction::Click { x, y, button } => {
+            run_xdotool(&["mousemove", &x.to_string(), &y.to_string()])?;
+            run_xdotool(&["click", xdotool_button(*button)])?;
+            Ok(InputExecution {
+                summary: format!("click x={x} y={y} button={}", button.as_str()),
+            })
+        }
+        NativeAction::DoubleClick { x, y, button } => {
+            run_xdotool(&["mousemove", &x.to_string(), &y.to_string()])?;
+            run_xdotool(&["click", "--repeat", "2", xdotool_button(*button)])?;
+            Ok(InputExecution {
+                summary: format!("double_click x={x} y={y} button={}", button.as_str()),
+            })
+        }
+        NativeAction::RightClick { x, y } => {
+            run_xdotool(&["mousemove", &x.to_string(), &y.to_string()])?;
+            run_xdotool(&["click", "3"])?;
+            Ok(InputExecution {
+                summary: format!("right_click x={x} y={y}"),
+            })
+        }
+        NativeAction::MoveMouse { x, y } => {
+            run_xdotool(&["mousemove", &x.to_string(), &y.to_string()])?;
+            Ok(InputExecution {
+                summary: format!("move_mouse x={x} y={y}"),
+            })
+        }
+        NativeAction::Wait { duration_ms } => {
+            thread::sleep(Duration::from_millis(*duration_ms));
+            Ok(InputExecution {
+                summary: format!("wait duration_ms={duration_ms}"),
+            })
+        }
+        NativeAction::Type { text } => {
+            run_xdotool(&["type", "--clearmodifiers", "--", text])?;
+            Ok(InputExecution {
+                summary: "type text=<redacted>".to_string(),
+            })
+        }
+        NativeAction::PressKey { key } => {
+            let mapped = linux_key(key)?;
+            run_xdotool(&["key", "--clearmodifiers", &mapped])?;
+            Ok(InputExecution {
+                summary: format!("press_key key={key}"),
+            })
+        }
+        NativeAction::Hotkey { keys } => {
+            let mapped = keys
+                .iter()
+                .map(|key| linux_key(key))
+                .collect::<Result<Vec<_>>>()?;
+            let sequence = mapped.join("+");
+            run_xdotool(&["key", "--clearmodifiers", &sequence])?;
+            Ok(InputExecution {
+                summary: format!("hotkey keys={}", keys.join("+")),
+            })
+        }
+        NativeAction::Drag {
+            from_x,
+            from_y,
+            to_x,
+            to_y,
+            duration_ms,
+            button,
+        } => {
+            let button = xdotool_button(*button);
+            run_xdotool(&["mousemove", &from_x.to_string(), &from_y.to_string()])?;
+            run_xdotool(&["mousedown", button])?;
+            let steps = 10_u64;
+            let sleep_ms = duration_ms.checked_div(steps).unwrap_or(0);
+            for step in 1..=steps {
+                let ratio = step as f64 / steps as f64;
+                let x = from_x + ((*to_x - *from_x) as f64 * ratio).round() as i32;
+                let y = from_y + ((*to_y - *from_y) as f64 * ratio).round() as i32;
+                run_xdotool(&["mousemove", &x.to_string(), &y.to_string()])?;
+                if sleep_ms > 0 {
+                    thread::sleep(Duration::from_millis(sleep_ms));
+                }
+            }
+            run_xdotool(&["mouseup", button])?;
+            Ok(InputExecution {
+                summary: format!(
+                    "drag from_x={from_x} from_y={from_y} to_x={to_x} to_y={to_y} duration_ms={duration_ms} button={}",
+                    button
+                ),
+            })
+        }
+        NativeAction::Scroll {
+            x,
+            y,
+            delta_x,
+            delta_y,
+        } => {
+            if let (Some(x), Some(y)) = (x, y) {
+                run_xdotool(&["mousemove", &x.to_string(), &y.to_string()])?;
+            }
+            click_scroll(*delta_y, "4", "5")?;
+            click_scroll(*delta_x, "6", "7")?;
+            Ok(InputExecution {
+                summary: format!("scroll delta_x={delta_x} delta_y={delta_y}"),
+            })
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn run_xdotool(args: &[&str]) -> Result<()> {
+    if std::env::var("DISPLAY").unwrap_or_default().is_empty() {
+        return Err(FerrisError::new(
+            ErrorKind::Execution,
+            "DISPLAY is not set; run FerrisGrid inside an X11 session such as Xvfb/noVNC",
+        ));
+    }
+    let status = Command::new("xdotool")
+        .args(args)
+        .status()
+        .map_err(|error| {
+            FerrisError::new(
+                ErrorKind::Execution,
+                format!("failed to run xdotool: {error}"),
+            )
+        })?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(FerrisError::new(
+            ErrorKind::Execution,
+            "xdotool failed while sending input to the X11 display",
+        ))
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn xdotool_button(button: MouseButton) -> &'static str {
+    match button {
+        MouseButton::Left => "1",
+        MouseButton::Middle => "2",
+        MouseButton::Right => "3",
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn click_scroll(
+    delta: i32,
+    positive_button: &'static str,
+    negative_button: &'static str,
+) -> Result<()> {
+    let button = if delta > 0 {
+        positive_button
+    } else if delta < 0 {
+        negative_button
+    } else {
+        return Ok(());
+    };
+    let clicks = ((delta.unsigned_abs() + 119) / 120).clamp(1, 30);
+    for _ in 0..clicks {
+        run_xdotool(&["click", button])?;
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn linux_key(key: &str) -> Result<String> {
+    let mapped = match key.to_ascii_lowercase().as_str() {
+        "cmd" | "command" | "meta" | "super" => "Super".to_string(),
+        "ctrl" | "control" => "ctrl".to_string(),
+        "alt" | "option" => "alt".to_string(),
+        "shift" => "shift".to_string(),
+        "enter" | "return" => "Return".to_string(),
+        "tab" => "Tab".to_string(),
+        "escape" | "esc" => "Escape".to_string(),
+        "space" => "space".to_string(),
+        "delete" | "del" => "Delete".to_string(),
+        "backspace" => "BackSpace".to_string(),
+        "up" | "arrowup" => "Up".to_string(),
+        "down" | "arrowdown" => "Down".to_string(),
+        "left" | "arrowleft" => "Left".to_string(),
+        "right" | "arrowright" => "Right".to_string(),
+        value if value.len() == 1 => value.to_string(),
+        other => {
+            return Err(FerrisError::new(
+                ErrorKind::Protocol,
+                format!("unsupported key for native Linux X11 backend: {other}"),
+            ));
+        }
+    };
+    Ok(mapped)
 }
 
 #[cfg(target_os = "macos")]

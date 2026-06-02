@@ -108,15 +108,132 @@ impl CaptureBackend for MacOsCaptureBackend {
     }
 }
 
+pub struct LinuxCaptureBackend;
+
+impl CaptureBackend for LinuxCaptureBackend {
+    fn name(&self) -> &'static str {
+        "native-linux-x11"
+    }
+
+    fn list_screens(&self) -> Result<Vec<ScreenInfo>> {
+        linux_screens()
+    }
+
+    fn capture(
+        &self,
+        target: CaptureTarget,
+        frame_dir: &Path,
+        format: &ImageFormat,
+        grid_overlay: bool,
+        max_image_edge: Option<u32>,
+    ) -> Result<Vec<CapturedScreen>> {
+        #[cfg(target_os = "linux")]
+        {
+            let screens = select_screens(linux_screens()?, target)?;
+            fs::create_dir_all(frame_dir)?;
+
+            let root_path = frame_dir.join("root-capture.png");
+            capture_linux_root(&root_path)?;
+            let root_image = ImageReader::open(&root_path)
+                .map_err(|error| FerrisError::new(ErrorKind::Capture, error.to_string()))?
+                .with_guessed_format()
+                .map_err(|error| FerrisError::new(ErrorKind::Capture, error.to_string()))?
+                .decode()
+                .map_err(|error| FerrisError::new(ErrorKind::Capture, error.to_string()))?;
+
+            let mut captured = Vec::new();
+            for screen in screens {
+                let x = screen.origin_x.max(0) as u32;
+                let y = screen.origin_y.max(0) as u32;
+                if x >= root_image.width() || y >= root_image.height() {
+                    return Err(FerrisError::new(
+                        ErrorKind::Capture,
+                        format!(
+                            "screen {} origin {},{} is outside root image {}x{}",
+                            screen.screen_id,
+                            screen.origin_x,
+                            screen.origin_y,
+                            root_image.width(),
+                            root_image.height()
+                        ),
+                    ));
+                }
+                let crop_width = screen
+                    .native_width
+                    .min(root_image.width().saturating_sub(x))
+                    .max(1);
+                let crop_height = screen
+                    .native_height
+                    .min(root_image.height().saturating_sub(y))
+                    .max(1);
+                let screenshot_path =
+                    frame_dir.join(format!("{}.{}", screen.screen_id, format.extension()));
+                let cropped = root_image.crop_imm(x, y, crop_width, crop_height);
+                cropped
+                    .save(&screenshot_path)
+                    .map_err(|error| FerrisError::new(ErrorKind::Capture, error.to_string()))?;
+                downsample_image(&screenshot_path, max_image_edge)?;
+                if grid_overlay {
+                    apply_grid_overlay(&screenshot_path)?;
+                }
+                let (image_width, image_height) = image_dimensions(&screenshot_path)
+                    .unwrap_or((screen.native_width, screen.native_height));
+                let metadata_path = write_metadata(
+                    frame_dir,
+                    &screen,
+                    &screenshot_path,
+                    image_width,
+                    image_height,
+                )?;
+                captured.push(CapturedScreen {
+                    screen,
+                    image_width,
+                    image_height,
+                    screenshot_path,
+                    metadata_path,
+                });
+            }
+            let _ = fs::remove_file(root_path);
+            Ok(captured)
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = (target, frame_dir, format, grid_overlay, max_image_edge);
+            Err(FerrisError::new(
+                ErrorKind::Platform,
+                "native Linux X11 capture is only available on Linux; use --backend native on this OS or --backend fake",
+            ))
+        }
+    }
+}
+
 pub fn backend_by_name(name: &str) -> Box<dyn CaptureBackend> {
     match name {
         "fake" => Box::new(FakeCaptureBackend),
-        "native" | "macos" | "native-macos" => Box::new(MacOsCaptureBackend),
-        _ => Box::new(MacOsCaptureBackend),
+        "native" => native_backend(),
+        "macos" | "native-macos" => Box::new(MacOsCaptureBackend),
+        "linux" | "x11" | "native-linux" | "native-linux-x11" => Box::new(LinuxCaptureBackend),
+        _ => native_backend(),
+    }
+}
+
+fn native_backend() -> Box<dyn CaptureBackend> {
+    #[cfg(target_os = "linux")]
+    {
+        Box::new(LinuxCaptureBackend)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        Box::new(MacOsCaptureBackend)
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        Box::new(MacOsCaptureBackend)
     }
 }
 
 #[derive(Clone)]
+#[allow(dead_code)]
 struct NativeScreen {
     info: ScreenInfo,
     capture_display_index: usize,
@@ -217,6 +334,164 @@ fn native_screens() -> Result<Vec<NativeScreen>> {
     ))
 }
 
+#[cfg(target_os = "linux")]
+fn linux_screens() -> Result<Vec<ScreenInfo>> {
+    let mut screens = run_output("xrandr", &["--query"])
+        .map(|output| parse_xrandr_screens(&output))
+        .unwrap_or_default();
+    if screens.is_empty() {
+        screens = run_output("xdpyinfo", &[])
+            .map(|output| parse_xdpyinfo_screens(&output))
+            .unwrap_or_default();
+    }
+    if screens.is_empty() {
+        return Err(FerrisError::new(
+            ErrorKind::Capture,
+            "could not discover an X11 screen; ensure DISPLAY is set and xrandr or xdpyinfo is installed",
+        ));
+    }
+    Ok(screens)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn linux_screens() -> Result<Vec<ScreenInfo>> {
+    Err(FerrisError::new(
+        ErrorKind::Platform,
+        "native Linux X11 capture is only available on Linux",
+    ))
+}
+
+#[cfg(target_os = "linux")]
+fn capture_linux_root(path: &Path) -> Result<()> {
+    let display = std::env::var("DISPLAY").unwrap_or_default();
+    if display.is_empty() {
+        return Err(FerrisError::new(
+            ErrorKind::Capture,
+            "DISPLAY is not set; run FerrisGrid inside an X11 session such as Xvfb/noVNC",
+        ));
+    }
+    let status = Command::new("import")
+        .arg("-window")
+        .arg("root")
+        .arg(path)
+        .status()
+        .map_err(|error| {
+            FerrisError::new(
+                ErrorKind::Capture,
+                format!("failed to run ImageMagick import: {error}"),
+            )
+        })?;
+    if !status.success() {
+        return Err(FerrisError::new(
+            ErrorKind::Capture,
+            "ImageMagick import failed; ensure the X11 display is reachable and imagemagick is installed",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn run_output(program: &str, args: &[&str]) -> Result<String> {
+    let output = Command::new(program).args(args).output().map_err(|error| {
+        FerrisError::new(
+            ErrorKind::Capture,
+            format!("failed to run {program}: {error}"),
+        )
+    })?;
+    if !output.status.success() {
+        return Err(FerrisError::new(
+            ErrorKind::Capture,
+            format!("{program} failed while querying the X11 display"),
+        ));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn parse_xrandr_screens(output: &str) -> Vec<ScreenInfo> {
+    let mut screens = output
+        .lines()
+        .filter(|line| line.contains(" connected"))
+        .filter_map(parse_xrandr_screen)
+        .collect::<Vec<_>>();
+    screens.sort_by_key(|screen| {
+        (
+            !screen.is_primary,
+            screen.origin_y,
+            screen.origin_x,
+            screen.name.clone(),
+        )
+    });
+    for (index, screen) in screens.iter_mut().enumerate() {
+        screen.screen_id = format!("screen-{}", index + 1);
+        screen.is_primary = index == 0 || screen.is_primary;
+    }
+    screens
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn parse_xrandr_screen(line: &str) -> Option<ScreenInfo> {
+    let mut fields = line.split_whitespace();
+    let name = fields.next()?.to_string();
+    if fields.next()? != "connected" {
+        return None;
+    }
+    let is_primary = line.split_whitespace().any(|field| field == "primary");
+    let geometry = line
+        .split_whitespace()
+        .find_map(|field| parse_geometry(field))?;
+    Some(ScreenInfo {
+        screen_id: String::new(),
+        name,
+        is_primary,
+        origin_x: geometry.2,
+        origin_y: geometry.3,
+        native_width: geometry.0,
+        native_height: geometry.1,
+        scale_factor: 1.0,
+    })
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn parse_geometry(value: &str) -> Option<(u32, u32, i32, i32)> {
+    let (width, rest) = value.split_once('x')?;
+    let x_start = rest.find(['+', '-'])?;
+    let height = &rest[..x_start];
+    let coords = &rest[x_start..];
+    let second_sign = coords[1..].find(['+', '-']).map(|index| index + 1)?;
+    let origin_x = &coords[..second_sign];
+    let origin_y = &coords[second_sign..];
+    Some((
+        width.parse().ok()?,
+        height.parse().ok()?,
+        origin_x.parse().ok()?,
+        origin_y.parse().ok()?,
+    ))
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn parse_xdpyinfo_screens(output: &str) -> Vec<ScreenInfo> {
+    output
+        .lines()
+        .find_map(|line| {
+            let line = line.trim();
+            let rest = line.strip_prefix("dimensions:")?.trim();
+            let dimensions = rest.split_whitespace().next()?;
+            let (width, height) = dimensions.split_once('x')?;
+            Some(vec![ScreenInfo {
+                screen_id: "screen-1".to_string(),
+                name: "X11 Screen".to_string(),
+                is_primary: true,
+                origin_x: 0,
+                origin_y: 0,
+                native_width: width.parse().ok()?,
+                native_height: height.parse().ok()?,
+                scale_factor: 1.0,
+            }])
+        })
+        .unwrap_or_default()
+}
+
 #[cfg(target_os = "macos")]
 fn capture_macos_display(
     display_index: usize,
@@ -286,6 +561,7 @@ fn select_screens(screens: Vec<ScreenInfo>, target: CaptureTarget) -> Result<Vec
     }
 }
 
+#[allow(dead_code)]
 fn select_native_screens(
     screens: Vec<NativeScreen>,
     target: CaptureTarget,
@@ -709,3 +985,53 @@ trait Pipe: Sized {
 }
 
 impl<T> Pipe for T {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_xrandr_screen_topology() {
+        let screens = parse_xrandr_screens(
+            "Screen 0: minimum 8 x 8, current 3200 x 1080, maximum 32767 x 32767\n\
+             HDMI-1 connected 1920x1080+1280+0 normal left inverted right x axis y axis\n\
+             eDP-1 connected primary 1280x800+0+0 normal left inverted right x axis y axis\n",
+        );
+
+        assert_eq!(screens.len(), 2);
+        assert_eq!(screens[0].screen_id, "screen-1");
+        assert_eq!(screens[0].name, "eDP-1");
+        assert!(screens[0].is_primary);
+        assert_eq!(screens[0].native_width, 1280);
+        assert_eq!(screens[0].native_height, 800);
+        assert_eq!(screens[1].screen_id, "screen-2");
+        assert_eq!(screens[1].origin_x, 1280);
+    }
+
+    #[test]
+    fn parses_xvfb_xrandr_default_screen() {
+        let screens = parse_xrandr_screens(
+            "Screen 0: minimum 1 x 1, current 1280 x 800, maximum 8192 x 8192\n\
+             screen connected primary 1280x800+0+0 0mm x 0mm\n",
+        );
+
+        assert_eq!(screens.len(), 1);
+        assert_eq!(screens[0].screen_id, "screen-1");
+        assert_eq!(screens[0].native_width, 1280);
+        assert_eq!(screens[0].native_height, 800);
+    }
+
+    #[test]
+    fn parses_xdpyinfo_dimensions_fallback() {
+        let screens = parse_xdpyinfo_screens(
+            "name of display:    :99\n\
+             screen #0:\n\
+               dimensions:    1440x900 pixels (381x238 millimeters)\n",
+        );
+
+        assert_eq!(screens.len(), 1);
+        assert_eq!(screens[0].screen_id, "screen-1");
+        assert_eq!(screens[0].native_width, 1440);
+        assert_eq!(screens[0].native_height, 900);
+    }
+}

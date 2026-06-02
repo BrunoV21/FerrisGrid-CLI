@@ -422,6 +422,6 @@ fn has_ffmpeg() -> bool {
 
 fn print_help() {
     println!(
-        "FerrisGrid\n\nCommands:\n  ferrisgrid observe [--backend native|fake] [--screen-id screen-1] [--grid-overlay true|false] [--max-image-edge 1280|native]\n  ferrisgrid act [--backend native|fake] [--file action.md] [--dry-run] [--max-image-edge 1280|native]\n  ferrisgrid doctor [--backend native|fake]\n  ferrisgrid recap <session_path> [--video mp4] [--framerate 2]\n  ferrisgrid clear [--output-dir .ferrisgrid] [--force]\n"
+        "FerrisGrid\n\nCommands:\n  ferrisgrid observe [--backend native|native-linux-x11|native-macos|fake] [--screen-id screen-1] [--grid-overlay true|false] [--max-image-edge 1280|native]\n  ferrisgrid act [--backend native|native-linux-x11|native-macos|fake] [--file action.md] [--dry-run] [--max-image-edge 1280|native]\n  ferrisgrid doctor [--backend native|native-linux-x11|native-macos|fake]\n  ferrisgrid recap <session_path> [--video mp4] [--framerate 2]\n  ferrisgrid clear [--output-dir .ferrisgrid] [--force]\n"
     );
 }
