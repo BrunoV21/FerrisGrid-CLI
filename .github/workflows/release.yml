@@ -108,6 +108,12 @@ jobs:
     runs-on: ubuntu-24.04
     needs: build
     steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+
       - name: Download artifacts
         uses: actions/download-artifact@v7
         with:
