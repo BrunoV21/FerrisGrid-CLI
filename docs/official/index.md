@@ -4,7 +4,7 @@ layout: home
 hero:
   name: "FERRISGRID"
   text: "Visual control for local agents"
-  tagline: "Capture screens. Return deterministic coordinates. Execute exactly one constrained action. Keep every screenshot and action trace on your machine."
+  tagline: "Turn screens into coordinates, and coordinates into action."
   actions:
     - theme: brand
       text: "Get Started"
@@ -24,6 +24,8 @@ features:
     details: "Every invocation observes once or executes one validated action, then exits. The agent owns the reasoning loop."
   - title: "Coordinate-first screenshots"
     details: "Screenshots include deterministic metadata so image-space choices map back to native screen coordinates."
+  - title: "Eyes plus a map"
+    details: "FerrisGrid turns desktop pixels into structured observations an LLM can reason over without hiding the underlying screenshot."
   - title: "Local traces"
     details: "Screenshots, metadata, action requests, parsed actions, results, and recap artifacts stay under .ferrisgrid by default."
   - title: "Docker workspace"
@@ -46,6 +48,12 @@ features:
 <strong>$ ferrisgrid act --file .ferrisgrid/action.md</strong><br>
 <span class="ok">status: executed</span>
 </div>
+
+## The idea
+
+Computers already show the state an agent needs: pixels, windows, buttons, text fields, menus. FerrisGrid makes that state actionable by pairing screenshots with deterministic coordinates, constrained actions, and local traces.
+
+FerrisGrid gives the machine eyes, gives the model a map, and lets Rust move fast.
 
 ## Install from source
 

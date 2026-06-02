@@ -1,6 +1,6 @@
 # FerrisGrid
 
-**Single-step visual computer control for local agents.**
+**Turn screens into coordinates, and coordinates into action.**
 
 FerrisGrid captures the current screen, maps it to deterministic coordinates, returns compact Markdown to an agent, executes one constrained action, captures the result, and exits. The agent does the reasoning. FerrisGrid handles the screen, coordinates, input, and local trace.
 
@@ -18,6 +18,7 @@ FerrisGrid captures the current screen, maps it to deterministic coordinates, re
 
 ## Why FerrisGrid?
 
+- **Eyes plus a map:** screenshots become coordinate-backed observations an LLM can reason over.
 - **Single-step by default:** every call performs one observation or one action.
 - **Deterministic coordinates:** screenshots map cleanly back to native screen pixels.
 - **Local-first traces:** screenshots, metadata, action requests, and results stay under `.ferrisgrid/`.
@@ -85,6 +86,7 @@ docker exec ferrisgrid-workspace ferrisgrid observe
 ## Documentation
 
 Official docs live in [`docs/official`](docs/official).
+Brand positioning and story notes live in [`docs/branding`](docs/branding).
 
 ```bash
 cd docs/official
