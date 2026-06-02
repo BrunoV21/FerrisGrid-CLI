@@ -3,6 +3,8 @@ use std::fmt::{self, Display};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::thread;
+use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub type Result<T> = std::result::Result<T, FerrisError>;
@@ -146,6 +148,7 @@ pub struct ObserveRequest {
     pub screen_id: Option<String>,
     pub format: ImageFormat,
     pub grid_overlay: bool,
+    pub max_image_edge: Option<u32>,
 }
 
 #[derive(Debug, Clone)]
@@ -163,6 +166,7 @@ pub struct ActRequest {
     pub input_markdown: String,
     pub dry_run: bool,
     pub format: ImageFormat,
+    pub max_image_edge: Option<u32>,
 }
 
 #[derive(Debug, Clone)]
@@ -170,6 +174,7 @@ pub struct ActResult {
     pub session_dir: PathBuf,
     pub step: u32,
     pub action_summary: String,
+    pub wait_after_ms: u64,
     pub result: String,
     pub dry_run: bool,
     pub screens: Vec<CapturedScreen>,
@@ -198,6 +203,7 @@ pub struct DoctorReport {
 pub struct AgentAction {
     pub status: ActionStatus,
     pub kind: Option<ActionKind>,
+    pub wait_after_ms: Option<u64>,
     pub confidence: Option<f32>,
     pub reason: Option<String>,
 }
@@ -422,6 +428,7 @@ pub trait CaptureBackend {
         frame_dir: &Path,
         format: &ImageFormat,
         grid_overlay: bool,
+        max_image_edge: Option<u32>,
     ) -> Result<Vec<CapturedScreen>>;
 }
 
@@ -447,8 +454,6 @@ impl SessionStore {
 
     pub fn ensure_root(&self) -> Result<()> {
         fs::create_dir_all(self.root.join("sessions"))?;
-        fs::create_dir_all(self.root.join("cache"))?;
-        fs::create_dir_all(self.root.join("logs"))?;
         let config = self.root.join("config.toml");
         if !config.exists() {
             fs::write(
@@ -579,23 +584,22 @@ impl SessionStore {
         parsed: &str,
         result: &str,
     ) -> Result<()> {
-        let agent = session_dir.join("agent");
         let actions = session_dir.join("actions");
-        fs::create_dir_all(&agent)?;
         fs::create_dir_all(&actions)?;
-        fs::write(agent.join(format!("{step:06}.request.md")), request)?;
-        fs::write(agent.join(format!("{step:06}.parsed.md")), parsed)?;
-        fs::write(actions.join(format!("{step:06}.action.md")), parsed)?;
-        fs::write(actions.join(format!("{step:06}.result.md")), result)?;
+        fs::write(
+            actions.join(format!("{step:06}.md")),
+            format!(
+                "## FerrisGrid Action\n- step: {step}\n\n### Request\n```text\n{}\n```\n\n### Parsed\n```text\n{}\n```\n\n### Result\n```text\n{}\n```\n",
+                request.trim(),
+                parsed.trim(),
+                result.trim()
+            ),
+        )?;
         Ok(())
     }
 
     fn ensure_session_dirs(&self, session_dir: &Path) -> Result<()> {
         fs::create_dir_all(session_dir.join("frames"))?;
-        fs::create_dir_all(session_dir.join("agent"))?;
-        fs::create_dir_all(session_dir.join("actions"))?;
-        fs::create_dir_all(session_dir.join("sequences"))?;
-        fs::create_dir_all(session_dir.join("export"))?;
         self.write_manifest_if_missing(session_dir)?;
         Ok(())
     }
@@ -610,7 +614,19 @@ pub fn observe(request: ObserveRequest, capture: &dyn CaptureBackend) -> Result<
         Some(id) => CaptureTarget::Screen(resolve_primary_alias(&id, &capture.list_screens()?)),
         None => CaptureTarget::All,
     };
-    let screens = capture.capture(target, &frame_dir, &request.format, request.grid_overlay)?;
+    let screens = match capture.capture(
+        target,
+        &frame_dir,
+        &request.format,
+        request.grid_overlay,
+        request.max_image_edge,
+    ) {
+        Ok(screens) => screens,
+        Err(error) => {
+            remove_empty_dir(&frame_dir);
+            return Err(error);
+        }
+    };
     store.append_event(
         &session_dir,
         format!(
@@ -673,6 +689,7 @@ fn act_inner(
             session_dir,
             step,
             action_summary: result.to_string(),
+            wait_after_ms: 0,
             result: result.to_string(),
             dry_run: request.dry_run,
             screens: Vec::new(),
@@ -696,9 +713,15 @@ fn act_inner(
         .map_err(|error| (error, ErrorContext::with_session(session_dir.clone())))?;
     let resolved_screen = resolve_action_screen(kind.screen_id(), &screens).map_err(|error| {
         let mut context = ErrorContext::with_session(session_dir.clone());
-        context.available_screens =
-            capture_latest_screens(&store, &session_dir, step, capture, &request.format)
-                .unwrap_or_default();
+        context.available_screens = capture_latest_screens(
+            &store,
+            &session_dir,
+            step,
+            capture,
+            &request.format,
+            request.max_image_edge,
+        )
+        .unwrap_or_default();
         (error, context)
     })?;
 
@@ -720,6 +743,11 @@ fn act_inner(
             .map_err(|error| (error, ErrorContext::with_session(session_dir.clone())))?
     };
 
+    let wait_after_ms = action.wait_after_ms.unwrap_or(0);
+    if wait_after_ms > 0 && !request.dry_run {
+        thread::sleep(Duration::from_millis(wait_after_ms));
+    }
+
     let frame_dir = store
         .frame_dir(&session_dir, step)
         .map_err(|error| (error, ErrorContext::with_session(session_dir.clone())))?;
@@ -727,10 +755,21 @@ fn act_inner(
         Some(screen) => CaptureTarget::Screen(screen.screen_id.clone()),
         None => CaptureTarget::All,
     };
-    let captured = capture
-        .capture(target, &frame_dir, &request.format, true)
-        .map_err(|error| (error, ErrorContext::with_session(session_dir.clone())))?;
+    let captured = match capture.capture(
+        target,
+        &frame_dir,
+        &request.format,
+        true,
+        request.max_image_edge,
+    ) {
+        Ok(captured) => captured,
+        Err(error) => {
+            remove_empty_dir(&frame_dir);
+            return Err((error, ErrorContext::with_session(session_dir.clone())));
+        }
+    };
     let summary = action_summary(&resolved_kind);
+    let parsed_summary = action_summary_with_wait_after(&resolved_kind, wait_after_ms);
     let result_text = if request.dry_run {
         "dry_run"
     } else {
@@ -741,7 +780,7 @@ fn act_inner(
             &session_dir,
             step,
             &request.input_markdown,
-            &summary,
+            &parsed_summary,
             &execution.summary,
         )
         .map_err(|error| (error, ErrorContext::with_session(session_dir.clone())))?;
@@ -749,10 +788,11 @@ fn act_inner(
         .append_event(
             &session_dir,
             format!(
-                "{} action_executed step={} action={} result={}",
+                "{} action_executed step={} action={} wait_after_ms={} result={}",
                 unix_millis(),
                 step,
                 summary,
+                wait_after_ms,
                 result_text
             ),
         )
@@ -762,6 +802,7 @@ fn act_inner(
         session_dir,
         step,
         action_summary: summary,
+        wait_after_ms,
         result: result_text.to_string(),
         dry_run: request.dry_run,
         screens: captured,
@@ -801,9 +842,14 @@ fn capture_latest_screens(
     step: u32,
     capture: &dyn CaptureBackend,
     format: &ImageFormat,
+    max_image_edge: Option<u32>,
 ) -> Result<Vec<CapturedScreen>> {
     let frame_dir = store.frame_dir(session_dir, step)?;
-    capture.capture(CaptureTarget::All, &frame_dir, format, true)
+    capture.capture(CaptureTarget::All, &frame_dir, format, true, max_image_edge)
+}
+
+fn remove_empty_dir(path: &Path) {
+    let _ = fs::remove_dir(path);
 }
 
 pub fn render_observation(result: &ObserveResult) -> String {
@@ -815,17 +861,34 @@ pub fn render_observation(result: &ObserveResult) -> String {
         "- coordinate_mode: {}\n",
         result.coordinate_mode.as_str()
     ));
+    out.push_str("- coordinate_range: x=0..1000 y=0..1000 origin=top_left scope=screen_local\n");
+    out.push_str(
+        "- action_coordinates: use these x/y values with ferrisgrid act; include screen_id when more than one screen is listed\n",
+    );
     out.push_str(&format!("- screens: {}\n", result.screens.len()));
     for screen in &result.screens {
         out.push_str(&format!(
-            "- screen: {} primary={} image={}x{} native={}x{} screenshot={}\n",
+            "- screen: {} primary={} image={}x{} native={}x{} origin={},{} coords=x:0..1000,y:0..1000 screenshot={} metadata={}\n",
             screen.screen.screen_id,
             screen.screen.is_primary,
             screen.image_width,
             screen.image_height,
             screen.screen.native_width,
             screen.screen.native_height,
-            screen.screenshot_path.display()
+            screen.screen.origin_x,
+            screen.screen.origin_y,
+            screen.screenshot_path.display(),
+            screen.metadata_path.display()
+        ));
+        out.push_str(&format!(
+            "- map: {} image_x=round(x/1000*{}) image_y=round(y/1000*{}) native_x={}+round(x/1000*{}) native_y={}+round(y/1000*{})\n",
+            screen.screen.screen_id,
+            screen.image_width.saturating_sub(1),
+            screen.image_height.saturating_sub(1),
+            screen.screen.origin_x,
+            screen.screen.native_width,
+            screen.screen.origin_y,
+            screen.screen.native_height
         ));
     }
     out
@@ -837,11 +900,22 @@ pub fn render_action_result(result: &ActResult) -> String {
     out.push_str(&format!("- session: {}\n", result.session_dir.display()));
     out.push_str(&format!("- step: {}\n", result.step));
     out.push_str(&format!("- action: {}\n", result.action_summary));
+    if result.wait_after_ms > 0 {
+        out.push_str(&format!("- wait_after_ms: {}\n", result.wait_after_ms));
+    }
     out.push_str(&format!("- result: {}\n", result.result));
+    out.push_str("- coordinate_mode: normalized-1000\n");
+    out.push_str("- coordinate_range: x=0..1000 y=0..1000 origin=top_left scope=screen_local\n");
     for screen in &result.screens {
         out.push_str(&format!(
-            "- screenshot: {}\n",
-            screen.screenshot_path.display()
+            "- screen: {} image={}x{} native={}x{} screenshot={} metadata={}\n",
+            screen.screen.screen_id,
+            screen.image_width,
+            screen.image_height,
+            screen.screen.native_width,
+            screen.screen.native_height,
+            screen.screenshot_path.display(),
+            screen.metadata_path.display()
         ));
     }
     out
@@ -858,9 +932,10 @@ pub fn render_action_error(error: &ActionErrorResult) -> String {
     }
     for screen in &error.available_screens {
         out.push_str(&format!(
-            "- available_screen: {} screenshot={}\n",
+            "- available_screen: {} coords=x:0..1000,y:0..1000 screenshot={} metadata={}\n",
             screen.screen.screen_id,
-            screen.screenshot_path.display()
+            screen.screenshot_path.display(),
+            screen.metadata_path.display()
         ));
     }
     out
@@ -939,6 +1014,11 @@ pub fn parse_action_block(markdown: &str) -> Result<AgentAction> {
         None => None,
     };
     let reason = fields.get("reason").cloned();
+    let wait_after_ms = match fields.get("wait_after_ms") {
+        Some(value) => Some(parse_u64(value, "wait_after_ms")?),
+        None => None,
+    };
+    validate_wait_after(wait_after_ms)?;
     let kind = if status == ActionStatus::Action {
         Some(parse_action_kind(&fields)?)
     } else {
@@ -948,9 +1028,22 @@ pub fn parse_action_block(markdown: &str) -> Result<AgentAction> {
     Ok(AgentAction {
         status,
         kind,
+        wait_after_ms,
         confidence,
         reason,
     })
+}
+
+fn validate_wait_after(wait_after_ms: Option<u64>) -> Result<()> {
+    if let Some(wait_after_ms) = wait_after_ms {
+        if wait_after_ms > 30_000 {
+            return Err(FerrisError::new(
+                ErrorKind::Protocol,
+                "wait_after_ms exceeds 30000 ms",
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn parse_action_kind(fields: &BTreeMap<String, String>) -> Result<ActionKind> {
@@ -1340,6 +1433,15 @@ fn action_summary(action: &ActionKind) -> String {
     }
 }
 
+fn action_summary_with_wait_after(action: &ActionKind, wait_after_ms: u64) -> String {
+    let summary = action_summary(action);
+    if wait_after_ms == 0 {
+        summary
+    } else {
+        format!("{summary}\nwait_after_ms={wait_after_ms}")
+    }
+}
+
 fn required(fields: &BTreeMap<String, String>, key: &str) -> Result<String> {
     fields
         .get(key)
@@ -1432,6 +1534,26 @@ mod tests {
         .unwrap();
         assert_eq!(action.status, ActionStatus::Action);
         assert!(matches!(action.kind, Some(ActionKind::Click { .. })));
+        assert_eq!(action.wait_after_ms, None);
+    }
+
+    #[test]
+    fn parses_wait_after_ms() {
+        let action = parse_action_block(
+            "status: action\naction: click\nscreen_id: screen-1\nx: 742\ny: 611\nbutton: left\nwait_after_ms: 750\n",
+        )
+        .unwrap();
+        assert_eq!(action.wait_after_ms, Some(750));
+    }
+
+    #[test]
+    fn rejects_excessive_wait_after_ms() {
+        let error = parse_action_block(
+            "status: action\naction: click\nscreen_id: screen-1\nx: 742\ny: 611\nwait_after_ms: 30001\n",
+        )
+        .unwrap_err();
+        assert_eq!(error.kind, ErrorKind::Protocol);
+        assert!(error.message.contains("wait_after_ms"));
     }
 
     #[test]

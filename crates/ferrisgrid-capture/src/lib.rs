@@ -2,7 +2,7 @@ use ferrisgrid_core::{
     CaptureBackend, CaptureTarget, CapturedScreen, ErrorKind, FerrisError, ImageFormat, Result,
     ScreenInfo,
 };
-use image::{DynamicImage, ImageReader, Rgba, RgbaImage};
+use image::{DynamicImage, ImageReader, Rgba, RgbaImage, imageops::FilterType};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -36,9 +36,10 @@ impl CaptureBackend for FakeCaptureBackend {
         frame_dir: &Path,
         format: &ImageFormat,
         grid_overlay: bool,
+        max_image_edge: Option<u32>,
     ) -> Result<Vec<CapturedScreen>> {
         let screens = select_screens(fake_screens(), target)?;
-        write_fake_captures(screens, frame_dir, format, grid_overlay)
+        write_fake_captures(screens, frame_dir, format, grid_overlay, max_image_edge)
     }
 }
 
@@ -62,6 +63,7 @@ impl CaptureBackend for MacOsCaptureBackend {
         frame_dir: &Path,
         format: &ImageFormat,
         grid_overlay: bool,
+        max_image_edge: Option<u32>,
     ) -> Result<Vec<CapturedScreen>> {
         #[cfg(target_os = "macos")]
         {
@@ -72,6 +74,7 @@ impl CaptureBackend for MacOsCaptureBackend {
                 let screenshot_path =
                     frame_dir.join(format!("{}.{}", screen.info.screen_id, format.extension()));
                 capture_macos_display(screen.capture_display_index, &screenshot_path, format)?;
+                downsample_image(&screenshot_path, max_image_edge)?;
                 if grid_overlay {
                     apply_grid_overlay(&screenshot_path)?;
                 }
@@ -96,7 +99,7 @@ impl CaptureBackend for MacOsCaptureBackend {
         }
         #[cfg(not(target_os = "macos"))]
         {
-            let _ = (target, frame_dir, format, grid_overlay);
+            let _ = (target, frame_dir, format, grid_overlay, max_image_edge);
             Err(FerrisError::new(
                 ErrorKind::Platform,
                 "native backend is currently implemented for macOS only; use --backend fake for local protocol tests",
@@ -311,18 +314,13 @@ fn write_fake_captures(
     frame_dir: &Path,
     format: &ImageFormat,
     grid_overlay: bool,
+    max_image_edge: Option<u32>,
 ) -> Result<Vec<CapturedScreen>> {
     fs::create_dir_all(frame_dir)?;
     let mut captured = Vec::new();
     for screen in screens {
-        let image_width = if screen.native_width > 1280 {
-            1280
-        } else {
-            screen.native_width
-        };
-        let image_height = ((image_width as f64 / screen.native_width as f64)
-            * screen.native_height as f64)
-            .round() as u32;
+        let (image_width, image_height) =
+            scaled_dimensions(screen.native_width, screen.native_height, max_image_edge);
         let screenshot_path =
             frame_dir.join(format!("{}.{}", screen.screen_id, format.extension()));
         write_placeholder_image(&screenshot_path, image_width, image_height)?;
@@ -358,7 +356,7 @@ fn write_metadata(
     fs::write(
         &metadata_path,
         format!(
-            "## Screen Metadata\n- screen_id: {}\n- name: {}\n- origin_x: {}\n- origin_y: {}\n- native_width: {}\n- native_height: {}\n- image_width: {}\n- image_height: {}\n- scale_factor: {}\n- is_primary: {}\n- screenshot: {}\n",
+            "## Screen Metadata\n- screen_id: {}\n- name: {}\n- coordinate_mode: normalized-1000\n- coordinate_range: x=0..1000 y=0..1000\n- coordinate_origin: top_left\n- coordinate_scope: screen_local\n- image_mapping: image_x=round(x/1000*(image_width-1)) image_y=round(y/1000*(image_height-1))\n- native_mapping: native_x=origin_x+round(x/1000*native_width) native_y=origin_y+round(y/1000*native_height)\n- origin_x: {}\n- origin_y: {}\n- native_width: {}\n- native_height: {}\n- image_width: {}\n- image_height: {}\n- scale_factor: {}\n- is_primary: {}\n- screenshot: {}\n",
             screen.screen_id,
             screen.name,
             screen.origin_x,
@@ -394,6 +392,46 @@ fn image_dimensions(path: &Path) -> Result<(u32, u32)> {
         .map_err(|error| FerrisError::new(ErrorKind::Capture, error.to_string()))
 }
 
+fn downsample_image(path: &Path, max_image_edge: Option<u32>) -> Result<()> {
+    let Some(max_edge) = max_image_edge.filter(|edge| *edge > 0) else {
+        return Ok(());
+    };
+    let image = ImageReader::open(path)
+        .map_err(|error| FerrisError::new(ErrorKind::Capture, error.to_string()))?
+        .with_guessed_format()
+        .map_err(|error| FerrisError::new(ErrorKind::Capture, error.to_string()))?
+        .decode()
+        .map_err(|error| FerrisError::new(ErrorKind::Capture, error.to_string()))?;
+    let (width, height) = (image.width(), image.height());
+    let longest = width.max(height);
+    if longest <= max_edge {
+        return Ok(());
+    }
+    let (new_width, new_height) = scaled_dimensions(width, height, Some(max_edge));
+    image
+        .resize(new_width, new_height, FilterType::Triangle)
+        .save(path)
+        .map_err(|error| FerrisError::new(ErrorKind::Capture, error.to_string()))?;
+    Ok(())
+}
+
+fn scaled_dimensions(width: u32, height: u32, max_image_edge: Option<u32>) -> (u32, u32) {
+    let width = width.max(1);
+    let height = height.max(1);
+    let Some(max_edge) = max_image_edge.filter(|edge| *edge > 0) else {
+        return (width, height);
+    };
+    let longest = width.max(height);
+    if longest <= max_edge {
+        return (width, height);
+    }
+    let scale = max_edge as f64 / longest as f64;
+    (
+        ((width as f64 * scale).round() as u32).max(1),
+        ((height as f64 * scale).round() as u32).max(1),
+    )
+}
+
 fn apply_grid_overlay(path: &Path) -> Result<()> {
     let mut image = ImageReader::open(path)
         .map_err(|error| FerrisError::new(ErrorKind::Capture, error.to_string()))?
@@ -418,6 +456,8 @@ fn draw_grid(image: &mut RgbaImage) {
     let minor = Rgba([255, 210, 0, 155]);
     let major = Rgba([255, 90, 0, 210]);
     let axis = Rgba([0, 180, 255, 235]);
+    let label = Rgba([255, 255, 255, 245]);
+    let label_bg = Rgba([0, 0, 0, 190]);
 
     for tick in (0..=1000).step_by(100) {
         let x = normalized_to_pixel(tick, width);
@@ -441,6 +481,39 @@ fn draw_grid(image: &mut RgbaImage) {
         draw_square(image, x, normalized_to_pixel(500, height), axis, 3);
         draw_square(image, normalized_to_pixel(500, width), y, axis, 3);
     }
+
+    for tick in (0..=1000).step_by(100) {
+        let x = normalized_to_pixel(tick, width);
+        let y = normalized_to_pixel(tick, height);
+        draw_centered_label(image, x, 8, &tick.to_string(), label, label_bg);
+        draw_label(
+            image,
+            8,
+            y.saturating_sub(8),
+            &tick.to_string(),
+            label,
+            label_bg,
+        );
+    }
+    draw_label(image, 8, 8, "0,0", axis, label_bg);
+    let center_y = normalized_to_pixel(500, height).saturating_add(10);
+    draw_centered_label(
+        image,
+        normalized_to_pixel(500, width),
+        center_y,
+        "500,500",
+        axis,
+        label_bg,
+    );
+    let bottom_y = height.saturating_sub(22);
+    draw_centered_label(
+        image,
+        normalized_to_pixel(1000, width),
+        bottom_y,
+        "1000,1000",
+        major,
+        label_bg,
+    );
 }
 
 fn normalized_to_pixel(value: u32, size: u32) -> u32 {
@@ -480,6 +553,98 @@ fn draw_square(image: &mut RgbaImage, x: u32, y: u32, color: Rgba<u8>, radius: u
         for py in y_start..=y_end {
             blend_pixel(image, px, py, color);
         }
+    }
+}
+
+fn draw_centered_label(
+    image: &mut RgbaImage,
+    center_x: u32,
+    y: u32,
+    text: &str,
+    color: Rgba<u8>,
+    background: Rgba<u8>,
+) {
+    let (image_width, _) = image.dimensions();
+    let label_width = text_width(text).saturating_add(4);
+    let x = center_x
+        .saturating_sub(label_width / 2)
+        .min(image_width.saturating_sub(label_width.saturating_add(1)));
+    draw_label(image, x, y, text, color, background);
+}
+
+fn draw_label(
+    image: &mut RgbaImage,
+    x: u32,
+    y: u32,
+    text: &str,
+    color: Rgba<u8>,
+    background: Rgba<u8>,
+) {
+    let (width, height) = image.dimensions();
+    let text_width = text_width(text);
+    let bg_width = text_width.saturating_add(4);
+    let bg_height = 16;
+    let x = x.min(width.saturating_sub(1));
+    let y = y.min(height.saturating_sub(1));
+    let x_end = x.saturating_add(bg_width).min(width.saturating_sub(1));
+    let y_end = y.saturating_add(bg_height).min(height.saturating_sub(1));
+    for px in x..=x_end {
+        for py in y..=y_end {
+            blend_pixel(image, px, py, background);
+        }
+    }
+    let mut cursor = x.saturating_add(2);
+    for ch in text.chars() {
+        draw_char(image, cursor, y.saturating_add(3), ch, color);
+        cursor = cursor.saturating_add(char_width(ch).saturating_add(2));
+    }
+}
+
+fn text_width(text: &str) -> u32 {
+    text.chars()
+        .map(|ch| char_width(ch).saturating_add(2))
+        .sum::<u32>()
+        .saturating_sub(2)
+}
+
+fn char_width(ch: char) -> u32 {
+    match ch {
+        ',' | '.' => 2,
+        '-' => 4,
+        _ => 8,
+    }
+}
+
+fn draw_char(image: &mut RgbaImage, x: u32, y: u32, ch: char, color: Rgba<u8>) {
+    let Some(pattern) = glyph(ch) else {
+        return;
+    };
+    for (row, bits) in pattern.iter().enumerate() {
+        for col in 0..5 {
+            if (bits & (1 << (4 - col))) != 0 {
+                let px = x.saturating_add((col * 2) as u32);
+                let py = y.saturating_add((row * 2) as u32);
+                draw_square(image, px, py, color, 1);
+            }
+        }
+    }
+}
+
+fn glyph(ch: char) -> Option<[u8; 5]> {
+    match ch {
+        '0' => Some([0b11111, 0b10001, 0b10001, 0b10001, 0b11111]),
+        '1' => Some([0b00100, 0b01100, 0b00100, 0b00100, 0b01110]),
+        '2' => Some([0b11111, 0b00001, 0b11111, 0b10000, 0b11111]),
+        '3' => Some([0b11111, 0b00001, 0b11111, 0b00001, 0b11111]),
+        '4' => Some([0b10001, 0b10001, 0b11111, 0b00001, 0b00001]),
+        '5' => Some([0b11111, 0b10000, 0b11111, 0b00001, 0b11111]),
+        '6' => Some([0b11111, 0b10000, 0b11111, 0b10001, 0b11111]),
+        '7' => Some([0b11111, 0b00001, 0b00010, 0b00100, 0b00100]),
+        '8' => Some([0b11111, 0b10001, 0b11111, 0b10001, 0b11111]),
+        '9' => Some([0b11111, 0b10001, 0b11111, 0b00001, 0b11111]),
+        ',' => Some([0b00, 0b00, 0b00, 0b10, 0b10]),
+        '-' => Some([0b00000, 0b00000, 0b11110, 0b00000, 0b00000]),
+        _ => None,
     }
 }
 
