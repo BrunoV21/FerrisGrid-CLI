@@ -1,3 +1,6 @@
 .compass/*
 /target/
 .ferrisgrid/
+docs/official/node_modules/
+docs/official/.vitepress/cache/
+docs/official/.vitepress/dist/
