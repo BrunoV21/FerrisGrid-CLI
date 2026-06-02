@@ -1,0 +1,132 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to package, for example v0.1.0"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build ${{ matrix.asset }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - asset: ferrisgrid-x86_64-unknown-linux-gnu
+            runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            binary_ext: ""
+            archive_ext: tar.gz
+          - asset: ferrisgrid-aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            binary_ext: ""
+            archive_ext: tar.gz
+          - asset: ferrisgrid-x86_64-apple-darwin
+            runner: macos-15-intel
+            target: x86_64-apple-darwin
+            binary_ext: ""
+            archive_ext: tar.gz
+          - asset: ferrisgrid-aarch64-apple-darwin
+            runner: macos-15
+            target: aarch64-apple-darwin
+            binary_ext: ""
+            archive_ext: tar.gz
+          - asset: ferrisgrid-x86_64-pc-windows-msvc
+            runner: windows-2025
+            target: x86_64-pc-windows-msvc
+            binary_ext: ".exe"
+            archive_ext: zip
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add ${{ matrix.target }}
+
+      - name: Build release binary
+        run: cargo +stable build --release --locked -p ferrisgrid-cli --target ${{ matrix.target }}
+
+      - name: Smoke test binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          bin="target/${{ matrix.target }}/release/ferrisgrid${{ matrix.binary_ext }}"
+          "$bin" doctor --backend fake
+          "$bin" observe --backend fake --output-dir .ferrisgrid-release-smoke
+
+      - name: Package archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          package="${{ matrix.asset }}"
+          mkdir -p "dist/$package"
+          cp "target/${{ matrix.target }}/release/ferrisgrid${{ matrix.binary_ext }}" "dist/$package/"
+          cp README.md "dist/$package/"
+          if [ -f LICENSE ]; then
+            cp LICENSE "dist/$package/"
+          fi
+          if [ "${{ matrix.archive_ext }}" = "zip" ]; then
+            powershell -NoLogo -NoProfile -Command "Compress-Archive -Path \"dist/${package}/*\" -DestinationPath \"${package}.zip\" -Force"
+          else
+            tar -C dist -czf "${package}.tar.gz" "$package"
+          fi
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.asset }}
+          path: |
+            ${{ matrix.asset }}.${{ matrix.archive_ext }}
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish GitHub release
+    runs-on: ubuntu-24.04
+    needs: build
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v7
+        with:
+          path: release-artifacts
+
+      - name: Generate checksums
+        run: |
+          find release-artifacts -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          assets="$(find release-artifacts -type f | sort)"
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release upload "$TAG_NAME" $assets SHA256SUMS --clobber
+          else
+            gh release create "$TAG_NAME" $assets SHA256SUMS --verify-tag --generate-notes
+          fi
