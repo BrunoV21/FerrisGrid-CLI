@@ -1,6 +1,16 @@
-# FerrisGrid
+<div align="center">
+  <img src="docs/branding/assets/ferrisgrid-banner.png" alt="FerrisGrid - terminal-first visual control for local AI agents" width="100%" />
 
-**Turn screens into coordinates, and coordinates into action.**
+  <p><strong>Turn screens into coordinates, and coordinates into action.</strong></p>
+
+  <p>
+    <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-8A2BE2?style=for-the-badge">
+    <img alt="Rust 2024" src="https://img.shields.io/badge/rust-2024-00E5FF?style=for-the-badge&logo=rust&logoColor=white">
+    <img alt="Cargo workspace" src="https://img.shields.io/badge/cargo-workspace-A970FF?style=for-the-badge&logo=rust&logoColor=white">
+    <img alt="Platforms: macOS, Linux, Windows" src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-111111?style=for-the-badge">
+    <img alt="Docker workspace" src="https://img.shields.io/badge/docker-workspace-2496ED?style=for-the-badge&logo=docker&logoColor=white">
+  </p>
+</div>
 
 FerrisGrid captures the current screen, maps it to deterministic coordinates, returns compact Markdown to an agent, executes one constrained action, captures the result, and exits. The agent does the reasoning. FerrisGrid handles the screen, coordinates, input, and local trace.
 
@@ -55,6 +65,16 @@ EOF
 
 cargo run -q -p ferrisgrid-cli -- act --file .ferrisgrid/action.md
 ```
+
+## Agent Skills
+
+If you are an agent, use this script to download and install the FerrisGrid skills:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/BrunoV21/FerrisGrid-CLI/main/scripts/install-ferrisgrid-skills.sh | sh
+```
+
+Run it from the directory that should receive the skill folders. The script downloads the repository zip, extracts the contents of `.agents/skills`, and installs those skill directories into the current directory.
 
 ## Docker Workspace
 
