@@ -90,7 +90,7 @@ The workflow uploads assets with `--clobber`, so existing release assets with th
 
 Docs deploy from `docs/official` through VitePress.
 
-The docs workflows use Node.js 22.
+The docs workflows use Node.js 24.
 
 The workflow runs:
 
