@@ -1,6 +1,6 @@
 use ferrisgrid_core::{
-    CaptureBackend, CaptureTarget, CapturedScreen, ErrorKind, FerrisError, ImageFormat, Result,
-    ScreenInfo,
+    CaptureBackend, CaptureTarget, CapturedScreen, ErrorKind, FerrisError, ImageFormat,
+    ImageSizeLimit, Result, ScreenInfo,
 };
 use image::{DynamicImage, ImageReader, Rgba, RgbaImage, imageops::FilterType};
 use std::fs;
@@ -36,10 +36,10 @@ impl CaptureBackend for FakeCaptureBackend {
         frame_dir: &Path,
         format: &ImageFormat,
         grid_overlay: bool,
-        max_image_edge: Option<u32>,
+        image_size_limit: ImageSizeLimit,
     ) -> Result<Vec<CapturedScreen>> {
         let screens = select_screens(fake_screens(), target)?;
-        write_fake_captures(screens, frame_dir, format, grid_overlay, max_image_edge)
+        write_fake_captures(screens, frame_dir, format, grid_overlay, image_size_limit)
     }
 }
 
@@ -63,7 +63,7 @@ impl CaptureBackend for MacOsCaptureBackend {
         frame_dir: &Path,
         format: &ImageFormat,
         grid_overlay: bool,
-        max_image_edge: Option<u32>,
+        image_size_limit: ImageSizeLimit,
     ) -> Result<Vec<CapturedScreen>> {
         #[cfg(target_os = "macos")]
         {
@@ -74,7 +74,7 @@ impl CaptureBackend for MacOsCaptureBackend {
                 let screenshot_path =
                     frame_dir.join(format!("{}.{}", screen.info.screen_id, format.extension()));
                 capture_macos_display(screen.capture_display_index, &screenshot_path, format)?;
-                downsample_image(&screenshot_path, max_image_edge)?;
+                downsample_image(&screenshot_path, image_size_limit)?;
                 if grid_overlay {
                     apply_grid_overlay(&screenshot_path)?;
                 }
@@ -99,7 +99,7 @@ impl CaptureBackend for MacOsCaptureBackend {
         }
         #[cfg(not(target_os = "macos"))]
         {
-            let _ = (target, frame_dir, format, grid_overlay, max_image_edge);
+            let _ = (target, frame_dir, format, grid_overlay, image_size_limit);
             Err(FerrisError::new(
                 ErrorKind::Platform,
                 "native backend is currently implemented for macOS only; use --backend fake for local protocol tests",
@@ -125,7 +125,7 @@ impl CaptureBackend for LinuxCaptureBackend {
         frame_dir: &Path,
         format: &ImageFormat,
         grid_overlay: bool,
-        max_image_edge: Option<u32>,
+        image_size_limit: ImageSizeLimit,
     ) -> Result<Vec<CapturedScreen>> {
         #[cfg(target_os = "linux")]
         {
@@ -172,7 +172,7 @@ impl CaptureBackend for LinuxCaptureBackend {
                 cropped
                     .save(&screenshot_path)
                     .map_err(|error| FerrisError::new(ErrorKind::Capture, error.to_string()))?;
-                downsample_image(&screenshot_path, max_image_edge)?;
+                downsample_image(&screenshot_path, image_size_limit)?;
                 if grid_overlay {
                     apply_grid_overlay(&screenshot_path)?;
                 }
@@ -198,7 +198,7 @@ impl CaptureBackend for LinuxCaptureBackend {
         }
         #[cfg(not(target_os = "linux"))]
         {
-            let _ = (target, frame_dir, format, grid_overlay, max_image_edge);
+            let _ = (target, frame_dir, format, grid_overlay, image_size_limit);
             Err(FerrisError::new(
                 ErrorKind::Platform,
                 "native Linux X11 capture is only available on Linux; use --backend native on this OS or --backend fake",
@@ -590,13 +590,13 @@ fn write_fake_captures(
     frame_dir: &Path,
     format: &ImageFormat,
     grid_overlay: bool,
-    max_image_edge: Option<u32>,
+    image_size_limit: ImageSizeLimit,
 ) -> Result<Vec<CapturedScreen>> {
     fs::create_dir_all(frame_dir)?;
     let mut captured = Vec::new();
     for screen in screens {
         let (image_width, image_height) =
-            scaled_dimensions(screen.native_width, screen.native_height, max_image_edge);
+            scaled_dimensions(screen.native_width, screen.native_height, image_size_limit);
         let screenshot_path =
             frame_dir.join(format!("{}.{}", screen.screen_id, format.extension()));
         write_placeholder_image(&screenshot_path, image_width, image_height)?;
@@ -668,10 +668,7 @@ fn image_dimensions(path: &Path) -> Result<(u32, u32)> {
         .map_err(|error| FerrisError::new(ErrorKind::Capture, error.to_string()))
 }
 
-fn downsample_image(path: &Path, max_image_edge: Option<u32>) -> Result<()> {
-    let Some(max_edge) = max_image_edge.filter(|edge| *edge > 0) else {
-        return Ok(());
-    };
+fn downsample_image(path: &Path, image_size_limit: ImageSizeLimit) -> Result<()> {
     let image = ImageReader::open(path)
         .map_err(|error| FerrisError::new(ErrorKind::Capture, error.to_string()))?
         .with_guessed_format()
@@ -679,11 +676,15 @@ fn downsample_image(path: &Path, max_image_edge: Option<u32>) -> Result<()> {
         .decode()
         .map_err(|error| FerrisError::new(ErrorKind::Capture, error.to_string()))?;
     let (width, height) = (image.width(), image.height());
+    let Some(max_edge) = target_max_edge(width, height, image_size_limit) else {
+        return Ok(());
+    };
     let longest = width.max(height);
     if longest <= max_edge {
         return Ok(());
     }
-    let (new_width, new_height) = scaled_dimensions(width, height, Some(max_edge));
+    let (new_width, new_height) =
+        scaled_dimensions(width, height, ImageSizeLimit::FixedMaxEdge(max_edge));
     image
         .resize(new_width, new_height, FilterType::Triangle)
         .save(path)
@@ -691,10 +692,10 @@ fn downsample_image(path: &Path, max_image_edge: Option<u32>) -> Result<()> {
     Ok(())
 }
 
-fn scaled_dimensions(width: u32, height: u32, max_image_edge: Option<u32>) -> (u32, u32) {
+fn scaled_dimensions(width: u32, height: u32, image_size_limit: ImageSizeLimit) -> (u32, u32) {
     let width = width.max(1);
     let height = height.max(1);
-    let Some(max_edge) = max_image_edge.filter(|edge| *edge > 0) else {
+    let Some(max_edge) = target_max_edge(width, height, image_size_limit) else {
         return (width, height);
     };
     let longest = width.max(height);
@@ -706,6 +707,25 @@ fn scaled_dimensions(width: u32, height: u32, max_image_edge: Option<u32>) -> (u
         ((width as f64 * scale).round() as u32).max(1),
         ((height as f64 * scale).round() as u32).max(1),
     )
+}
+
+fn target_max_edge(width: u32, height: u32, image_size_limit: ImageSizeLimit) -> Option<u32> {
+    let width = width.max(1);
+    let height = height.max(1);
+    match image_size_limit {
+        ImageSizeLimit::Native => None,
+        ImageSizeLimit::FixedMaxEdge(edge) => Some(edge.max(1)),
+        ImageSizeLimit::Adaptive {
+            min_long_edge,
+            min_short_edge,
+        } => {
+            let longest = width.max(height);
+            let shortest = width.min(height);
+            let short_side_cap =
+                ((longest as u64 * min_short_edge.max(1) as u64).div_ceil(shortest as u64)) as u32;
+            Some(longest.min(min_long_edge.max(short_side_cap).max(1)))
+        }
+    }
 }
 
 fn apply_grid_overlay(path: &Path) -> Result<()> {
@@ -1033,5 +1053,28 @@ mod tests {
         assert_eq!(screens[0].screen_id, "screen-1");
         assert_eq!(screens[0].native_width, 1440);
         assert_eq!(screens[0].native_height, 900);
+    }
+
+    #[test]
+    fn adaptive_limit_preserves_minimum_short_edge() {
+        let limit = ImageSizeLimit::Adaptive {
+            min_long_edge: 800,
+            min_short_edge: 500,
+        };
+
+        assert_eq!(scaled_dimensions(1710, 1107, limit), (800, 518));
+        assert_eq!(scaled_dimensions(2560, 1440, limit), (889, 500));
+        assert_eq!(scaled_dimensions(3440, 1440, limit), (1195, 500));
+        assert_eq!(scaled_dimensions(5120, 1440, limit), (1778, 500));
+    }
+
+    #[test]
+    fn adaptive_limit_never_upscales_small_screens() {
+        let limit = ImageSizeLimit::Adaptive {
+            min_long_edge: 800,
+            min_short_edge: 500,
+        };
+
+        assert_eq!(scaled_dimensions(640, 400, limit), (640, 400));
     }
 }

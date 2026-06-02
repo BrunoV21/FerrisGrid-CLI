@@ -27,7 +27,8 @@ wait_after_ms: 500
 | `--output-dir <path>` | Read/write session data somewhere other than `.ferrisgrid`. |
 | `--session <name>` | Use a named session. |
 | `--format jpg|png` | Choose post-action screenshot format. |
-| `--max-image-edge <px>` | Bound screenshot size. |
+| `--resolution fast|balanced|detail|native` | Use a named screenshot-size preset. `balanced` is the adaptive default. |
+| `--max-image-edge <px>` | Use a fixed longest-edge cap instead of the adaptive default. |
 | `--no-downsample` | Keep native image dimensions. |
 | `--backend <name>` | Select capture/input backend. |
 

@@ -1,7 +1,7 @@
 use ferrisgrid_capture::backend_by_name as capture_backend;
 use ferrisgrid_core::{
-    ActRequest, DoctorReport, ImageFormat, ObserveRequest, SessionStore, act, observe,
-    render_action_error, render_action_result, render_doctor, render_observation,
+    ActRequest, DoctorReport, ImageFormat, ImageSizeLimit, ObserveRequest, SessionStore, act,
+    observe, render_action_error, render_action_result, render_doctor, render_observation,
 };
 use ferrisgrid_export::{RecapOptions, VideoFormat, recap_with_options, render_recap};
 use ferrisgrid_input::backend_by_name as input_backend;
@@ -10,6 +10,11 @@ use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process;
+
+const FAST_IMAGE_EDGE: u32 = 800;
+const BALANCED_MIN_LONG_EDGE: u32 = 800;
+const BALANCED_MIN_SHORT_EDGE: u32 = 500;
+const DETAIL_IMAGE_EDGE: u32 = 1920;
 
 fn main() {
     if let Err(error) = run() {
@@ -56,7 +61,7 @@ fn command_observe(args: Vec<String>) -> ferrisgrid_core::Result<()> {
             screen_id: options.screen_id,
             format: options.format,
             grid_overlay: options.grid_overlay,
-            max_image_edge: options.max_image_edge,
+            image_size_limit: options.image_size_limit,
         },
         capture.as_ref(),
     )?;
@@ -83,7 +88,7 @@ fn command_act(args: Vec<String>) -> ferrisgrid_core::Result<()> {
             input_markdown,
             dry_run: options.dry_run,
             format: options.format,
-            max_image_edge: options.max_image_edge,
+            image_size_limit: options.image_size_limit,
         },
         capture.as_ref(),
         input.as_ref(),
@@ -253,7 +258,7 @@ struct Options {
     screen_id: Option<String>,
     format: ImageFormat,
     grid_overlay: bool,
-    max_image_edge: Option<u32>,
+    image_size_limit: ImageSizeLimit,
     backend: String,
     dry_run: bool,
     file: Option<PathBuf>,
@@ -269,9 +274,10 @@ impl Options {
             screen_id: env::var("FERRISGRID_DEFAULT_SCREEN_ID").ok(),
             format: ImageFormat::Jpg,
             grid_overlay: true,
-            max_image_edge: parse_max_image_edge(
-                &env::var("FERRISGRID_MAX_IMAGE_EDGE").unwrap_or_else(|_| "1280".to_string()),
-            )?,
+            image_size_limit: match env::var("FERRISGRID_MAX_IMAGE_EDGE") {
+                Ok(value) => parse_max_image_edge(&value)?,
+                Err(_) => balanced_image_size_limit(),
+            },
             backend: env::var("FERRISGRID_BACKEND").unwrap_or_else(|_| "native".to_string()),
             dry_run: false,
             file: None,
@@ -299,13 +305,19 @@ impl Options {
                     index += 1;
                     options.grid_overlay = parse_bool(value(&args, index, "--grid-overlay")?)?;
                 }
-                "--max-image-edge" | "--resolution" => {
+                "--max-image-edge" => {
                     let flag = args[index].clone();
                     index += 1;
-                    options.max_image_edge = parse_max_image_edge(value(&args, index, &flag)?)?;
+                    options.image_size_limit = parse_max_image_edge(value(&args, index, &flag)?)?;
+                }
+                "--resolution" => {
+                    let flag = args[index].clone();
+                    index += 1;
+                    options.image_size_limit =
+                        parse_resolution(value(&args, index, &flag)?, &flag)?;
                 }
                 "--no-downsample" => {
-                    options.max_image_edge = None;
+                    options.image_size_limit = ImageSizeLimit::Native;
                 }
                 "--backend" => {
                     index += 1;
@@ -355,9 +367,16 @@ fn parse_bool(value: &str) -> ferrisgrid_core::Result<bool> {
     }
 }
 
-fn parse_max_image_edge(value: &str) -> ferrisgrid_core::Result<Option<u32>> {
+fn balanced_image_size_limit() -> ImageSizeLimit {
+    ImageSizeLimit::Adaptive {
+        min_long_edge: BALANCED_MIN_LONG_EDGE,
+        min_short_edge: BALANCED_MIN_SHORT_EDGE,
+    }
+}
+
+fn parse_max_image_edge(value: &str) -> ferrisgrid_core::Result<ImageSizeLimit> {
     match value {
-        "native" | "none" | "off" | "0" => Ok(None),
+        "native" | "none" | "off" | "0" => Ok(ImageSizeLimit::Native),
         other => {
             let edge = other.parse::<u32>().map_err(|_| {
                 ferrisgrid_core::FerrisError::new(
@@ -371,8 +390,23 @@ fn parse_max_image_edge(value: &str) -> ferrisgrid_core::Result<Option<u32>> {
                     "max image edge must be at least 320 pixels",
                 ));
             }
-            Ok(Some(edge))
+            Ok(ImageSizeLimit::FixedMaxEdge(edge))
         }
+    }
+}
+
+fn parse_resolution(value: &str, flag: &str) -> ferrisgrid_core::Result<ImageSizeLimit> {
+    match value {
+        "fast" => Ok(ImageSizeLimit::FixedMaxEdge(FAST_IMAGE_EDGE)),
+        "balanced" => Ok(balanced_image_size_limit()),
+        "detail" => Ok(ImageSizeLimit::FixedMaxEdge(DETAIL_IMAGE_EDGE)),
+        "native" => Ok(ImageSizeLimit::Native),
+        _ => parse_max_image_edge(value).map_err(|_| {
+            ferrisgrid_core::FerrisError::new(
+                ferrisgrid_core::ErrorKind::Protocol,
+                format!("{flag} must be fast, balanced, detail, native, or a max image edge"),
+            )
+        }),
     }
 }
 
@@ -422,6 +456,182 @@ fn has_ffmpeg() -> bool {
 
 fn print_help() {
     println!(
-        "FerrisGrid\n\nCommands:\n  ferrisgrid observe [--backend native|native-linux-x11|native-macos|fake] [--screen-id screen-1] [--grid-overlay true|false] [--max-image-edge 1280|native]\n  ferrisgrid act [--backend native|native-linux-x11|native-macos|fake] [--file action.md] [--dry-run] [--max-image-edge 1280|native]\n  ferrisgrid doctor [--backend native|native-linux-x11|native-macos|fake]\n  ferrisgrid recap <session_path> [--video mp4] [--framerate 2]\n  ferrisgrid clear [--output-dir .ferrisgrid] [--force]\n"
+        "FerrisGrid\n\nCommands:\n  ferrisgrid observe [--backend native|native-linux-x11|native-macos|fake] [--screen-id screen-1] [--grid-overlay true|false] [--resolution fast|balanced|detail|native] [--max-image-edge 800|native]\n  ferrisgrid act [--backend native|native-linux-x11|native-macos|fake] [--file action.md] [--dry-run] [--resolution fast|balanced|detail|native] [--max-image-edge 800|native]\n  ferrisgrid doctor [--backend native|native-linux-x11|native-macos|fake]\n  ferrisgrid recap <session_path> [--video mp4] [--framerate 2]\n  ferrisgrid clear [--output-dir .ferrisgrid] [--force]\n"
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ferrisgrid_capture::FakeCaptureBackend;
+    use std::sync::{
+        Mutex,
+        atomic::{AtomicU64, Ordering},
+    };
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+    static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn parse_options(args: &[&str]) -> Options {
+        let _guard = ENV_LOCK.lock().unwrap();
+        clear_option_env();
+        Options::parse(args.iter().map(|value| value.to_string()).collect()).unwrap()
+    }
+
+    fn parse_options_with_env(args: &[&str]) -> Options {
+        Options::parse(args.iter().map(|value| value.to_string()).collect()).unwrap()
+    }
+
+    fn clear_option_env() {
+        unsafe {
+            env::remove_var("FERRISGRID_MAX_IMAGE_EDGE");
+            env::remove_var("FERRISGRID_OUTPUT_DIR");
+            env::remove_var("FERRISGRID_DEFAULT_SCREEN_ID");
+            env::remove_var("FERRISGRID_BACKEND");
+        }
+    }
+
+    fn temp_output_dir(name: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let counter = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        env::temp_dir().join(format!(
+            "ferrisgrid-cli-test-{name}-{}-{nonce}-{counter}",
+            process::id()
+        ))
+    }
+
+    fn observe_fake_dimensions(image_size_limit: ImageSizeLimit) -> Vec<(u32, u32)> {
+        let output_dir = temp_output_dir("observe-dimensions");
+        let result = observe(
+            ObserveRequest {
+                output_dir: output_dir.clone(),
+                session: None,
+                screen_id: None,
+                format: ImageFormat::Jpg,
+                grid_overlay: true,
+                image_size_limit,
+            },
+            &FakeCaptureBackend::new(),
+        )
+        .unwrap();
+        let dimensions = result
+            .screens
+            .iter()
+            .map(|screen| (screen.image_width, screen.image_height))
+            .collect();
+        let _ = fs::remove_dir_all(output_dir);
+        dimensions
+    }
+
+    #[test]
+    fn default_resolution_is_adaptive_balanced() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        clear_option_env();
+
+        assert_eq!(
+            parse_options_with_env(&[]).image_size_limit,
+            balanced_image_size_limit()
+        );
+    }
+
+    #[test]
+    fn parses_resolution_presets() {
+        assert_eq!(
+            parse_options(&["--resolution", "fast"]).image_size_limit,
+            ImageSizeLimit::FixedMaxEdge(FAST_IMAGE_EDGE)
+        );
+        assert_eq!(
+            parse_options(&["--resolution", "balanced"]).image_size_limit,
+            balanced_image_size_limit()
+        );
+        assert_eq!(
+            parse_options(&["--resolution", "detail"]).image_size_limit,
+            ImageSizeLimit::FixedMaxEdge(DETAIL_IMAGE_EDGE)
+        );
+        assert_eq!(
+            parse_options(&["--resolution", "native"]).image_size_limit,
+            ImageSizeLimit::Native
+        );
+    }
+
+    #[test]
+    fn parses_exact_max_image_edge() {
+        assert_eq!(
+            parse_options(&["--max-image-edge", "960"]).image_size_limit,
+            ImageSizeLimit::FixedMaxEdge(960)
+        );
+    }
+
+    #[test]
+    fn env_can_override_default_max_image_edge() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        unsafe {
+            env::set_var("FERRISGRID_MAX_IMAGE_EDGE", "960");
+        }
+        let options = parse_options_with_env(&[]);
+        unsafe {
+            env::remove_var("FERRISGRID_MAX_IMAGE_EDGE");
+        }
+
+        assert_eq!(options.image_size_limit, ImageSizeLimit::FixedMaxEdge(960));
+    }
+
+    #[test]
+    fn later_resolution_flag_wins() {
+        assert_eq!(
+            parse_options(&["--resolution", "fast", "--max-image-edge", "960"]).image_size_limit,
+            ImageSizeLimit::FixedMaxEdge(960)
+        );
+        assert_eq!(
+            parse_options(&["--max-image-edge", "960", "--resolution", "native"]).image_size_limit,
+            ImageSizeLimit::Native
+        );
+        assert_eq!(
+            parse_options(&["--resolution", "detail", "--no-downsample"]).image_size_limit,
+            ImageSizeLimit::Native
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_resolution_preset() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        clear_option_env();
+        let error =
+            Options::parse(vec!["--resolution".to_string(), "tiny".to_string()]).unwrap_err();
+
+        assert_eq!(error.kind, ferrisgrid_core::ErrorKind::Protocol);
+        assert!(error.message.contains("fast, balanced, detail, native"));
+    }
+
+    #[test]
+    fn fake_backend_uses_fast_resolution_dimensions() {
+        let dimensions = observe_fake_dimensions(ImageSizeLimit::FixedMaxEdge(FAST_IMAGE_EDGE));
+
+        assert_eq!(dimensions, vec![(800, 520), (800, 450)]);
+    }
+
+    #[test]
+    fn fake_backend_uses_adaptive_balanced_resolution_dimensions() {
+        let dimensions = observe_fake_dimensions(balanced_image_size_limit());
+
+        assert_eq!(dimensions, vec![(800, 520), (889, 500)]);
+    }
+
+    #[test]
+    fn fake_backend_uses_detail_resolution_dimensions() {
+        let dimensions = observe_fake_dimensions(ImageSizeLimit::FixedMaxEdge(DETAIL_IMAGE_EDGE));
+
+        assert_eq!(dimensions, vec![(1920, 1247), (1920, 1080)]);
+    }
+
+    #[test]
+    fn fake_backend_uses_native_resolution_dimensions() {
+        let dimensions = observe_fake_dimensions(ImageSizeLimit::Native);
+
+        assert_eq!(dimensions, vec![(3024, 1964), (2560, 1440)]);
+    }
 }

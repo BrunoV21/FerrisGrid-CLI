@@ -15,10 +15,13 @@ cargo run -q -p ferrisgrid-cli -- observe
 | `--session <name>` | Continue or create a named session. |
 | `--format jpg|png` | Choose screenshot format. |
 | `--grid-overlay false` | Disable visual grid stamping when supported. |
-| `--max-image-edge <px>` | Bound screenshot size sent to the agent. |
+| `--resolution fast|balanced|detail|native` | Use a named screenshot-size preset. `balanced` is the adaptive default. |
+| `--max-image-edge <px>` | Use a fixed longest-edge cap instead of the adaptive default. |
 | `--no-downsample` | Keep native image dimensions. |
 | `--backend <name>` | Select a capture backend. |
 
 ## Output contract
 
-The output includes screenshot paths immediately after capture, plus dimensions and coordinate metadata for each screen.
+The output includes screenshot paths immediately after capture, the `image_size_limit` used for downsampling, plus dimensions and coordinate metadata for each screen.
+
+`balanced` keeps at least an 800 px long edge and raises that cap on wide screens to preserve roughly a 500 px short edge. FerrisGrid never upscales screenshots.

@@ -21,7 +21,7 @@ cargo run -q -p ferrisgrid-cli -- doctor
 | `FERRISGRID_BACKEND` | Selects the capture/input backend when supported. |
 | `FERRISGRID_OUTPUT_DIR` | Changes where `.ferrisgrid` session data is written. |
 | `FERRISGRID_DEFAULT_SCREEN_ID` | Sets a default screen target for observe/action contexts. |
-| `FERRISGRID_MAX_IMAGE_EDGE` | Sets the default maximum screenshot edge, or `native` to disable downsampling. |
+| `FERRISGRID_MAX_IMAGE_EDGE` | Sets a fixed default maximum screenshot edge, or `native` to disable downsampling. Leave unset for the adaptive `balanced` default. |
 
 ## Docker image
 

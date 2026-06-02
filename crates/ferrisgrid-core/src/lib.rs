@@ -141,6 +141,31 @@ impl std::str::FromStr for ImageFormat {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImageSizeLimit {
+    Native,
+    FixedMaxEdge(u32),
+    Adaptive {
+        min_long_edge: u32,
+        min_short_edge: u32,
+    },
+}
+
+impl ImageSizeLimit {
+    pub fn description(self) -> String {
+        match self {
+            Self::Native => "native".to_string(),
+            Self::FixedMaxEdge(edge) => edge.to_string(),
+            Self::Adaptive {
+                min_long_edge,
+                min_short_edge,
+            } => {
+                format!("adaptive min_long_edge={min_long_edge} min_short_edge={min_short_edge}")
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ObserveRequest {
     pub output_dir: PathBuf,
@@ -148,7 +173,7 @@ pub struct ObserveRequest {
     pub screen_id: Option<String>,
     pub format: ImageFormat,
     pub grid_overlay: bool,
-    pub max_image_edge: Option<u32>,
+    pub image_size_limit: ImageSizeLimit,
 }
 
 #[derive(Debug, Clone)]
@@ -156,6 +181,7 @@ pub struct ObserveResult {
     pub session_dir: PathBuf,
     pub step: u32,
     pub coordinate_mode: CoordinateMode,
+    pub image_size_limit: ImageSizeLimit,
     pub screens: Vec<CapturedScreen>,
 }
 
@@ -166,7 +192,7 @@ pub struct ActRequest {
     pub input_markdown: String,
     pub dry_run: bool,
     pub format: ImageFormat,
-    pub max_image_edge: Option<u32>,
+    pub image_size_limit: ImageSizeLimit,
 }
 
 #[derive(Debug, Clone)]
@@ -177,6 +203,7 @@ pub struct ActResult {
     pub wait_after_ms: u64,
     pub result: String,
     pub dry_run: bool,
+    pub image_size_limit: ImageSizeLimit,
     pub screens: Vec<CapturedScreen>,
 }
 
@@ -428,7 +455,7 @@ pub trait CaptureBackend {
         frame_dir: &Path,
         format: &ImageFormat,
         grid_overlay: bool,
-        max_image_edge: Option<u32>,
+        image_size_limit: ImageSizeLimit,
     ) -> Result<Vec<CapturedScreen>>;
 }
 
@@ -619,7 +646,7 @@ pub fn observe(request: ObserveRequest, capture: &dyn CaptureBackend) -> Result<
         &frame_dir,
         &request.format,
         request.grid_overlay,
-        request.max_image_edge,
+        request.image_size_limit,
     ) {
         Ok(screens) => screens,
         Err(error) => {
@@ -640,6 +667,7 @@ pub fn observe(request: ObserveRequest, capture: &dyn CaptureBackend) -> Result<
         session_dir,
         step,
         coordinate_mode: CoordinateMode::Normalized1000,
+        image_size_limit: request.image_size_limit,
         screens,
     })
 }
@@ -692,6 +720,7 @@ fn act_inner(
             wait_after_ms: 0,
             result: result.to_string(),
             dry_run: request.dry_run,
+            image_size_limit: request.image_size_limit,
             screens: Vec::new(),
         });
     }
@@ -719,7 +748,7 @@ fn act_inner(
             step,
             capture,
             &request.format,
-            request.max_image_edge,
+            request.image_size_limit,
         )
         .unwrap_or_default();
         (error, context)
@@ -760,7 +789,7 @@ fn act_inner(
         &frame_dir,
         &request.format,
         true,
-        request.max_image_edge,
+        request.image_size_limit,
     ) {
         Ok(captured) => captured,
         Err(error) => {
@@ -805,6 +834,7 @@ fn act_inner(
         wait_after_ms,
         result: result_text.to_string(),
         dry_run: request.dry_run,
+        image_size_limit: request.image_size_limit,
         screens: captured,
     })
 }
@@ -842,10 +872,16 @@ fn capture_latest_screens(
     step: u32,
     capture: &dyn CaptureBackend,
     format: &ImageFormat,
-    max_image_edge: Option<u32>,
+    image_size_limit: ImageSizeLimit,
 ) -> Result<Vec<CapturedScreen>> {
     let frame_dir = store.frame_dir(session_dir, step)?;
-    capture.capture(CaptureTarget::All, &frame_dir, format, true, max_image_edge)
+    capture.capture(
+        CaptureTarget::All,
+        &frame_dir,
+        format,
+        true,
+        image_size_limit,
+    )
 }
 
 fn remove_empty_dir(path: &Path) {
@@ -860,6 +896,10 @@ pub fn render_observation(result: &ObserveResult) -> String {
     out.push_str(&format!(
         "- coordinate_mode: {}\n",
         result.coordinate_mode.as_str()
+    ));
+    out.push_str(&format!(
+        "- image_size_limit: {}\n",
+        result.image_size_limit.description()
     ));
     out.push_str("- coordinate_range: x=0..1000 y=0..1000 origin=top_left scope=screen_local\n");
     out.push_str(
@@ -905,6 +945,10 @@ pub fn render_action_result(result: &ActResult) -> String {
     }
     out.push_str(&format!("- result: {}\n", result.result));
     out.push_str("- coordinate_mode: normalized-1000\n");
+    out.push_str(&format!(
+        "- image_size_limit: {}\n",
+        result.image_size_limit.description()
+    ));
     out.push_str("- coordinate_range: x=0..1000 y=0..1000 origin=top_left scope=screen_local\n");
     for screen in &result.screens {
         out.push_str(&format!(
