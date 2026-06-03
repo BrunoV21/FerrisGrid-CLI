@@ -1,12 +1,15 @@
 import { defineConfig } from 'vitepress'
 
+const siteBase = '/FerrisGrid-CLI/'
+
 export default defineConfig({
   title: 'FerrisGrid',
   description: 'Single-step visual computer control for local agents.',
-  base: '/FerrisGrid-CLI/',
+  base: siteBase,
   appearance: 'force-dark',
 
   head: [
+    ['link', { rel: 'icon', type: 'image/svg+xml', href: `${siteBase}favicon.svg` }],
     ['link', { rel: 'preconnect', href: 'https://fonts.googleapis.com' }],
     ['link', { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' }],
     ['link', { href: 'https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap', rel: 'stylesheet' }]
