@@ -3,7 +3,7 @@
 `clear` removes the FerrisGrid output directory after safety validation.
 
 ```bash
-cargo run -q -p ferrisgrid-cli -- clear --force
+ferrisgrid clear --force
 ```
 
 ## Options

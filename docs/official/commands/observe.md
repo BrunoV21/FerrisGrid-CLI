@@ -3,7 +3,7 @@
 `observe` captures the current screen state and returns compact Markdown.
 
 ```bash
-cargo run -q -p ferrisgrid-cli -- observe
+ferrisgrid observe
 ```
 
 ## Options

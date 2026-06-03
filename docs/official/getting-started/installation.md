@@ -1,11 +1,23 @@
 # Installation
 
-FerrisGrid is currently installed from a local checkout.
+For normal use, install the published CLI with Cargo:
 
 ```bash
-git clone https://github.com/BrunoV21/FerrisPilot.git
-cd FerrisPilot
+cargo install ferrisgrid-cli
+ferrisgrid doctor
+```
+
+The crates.io package is `ferrisgrid-cli`; the installed command is `ferrisgrid`.
+
+## Development from source
+
+Use a local checkout when you want to build, test, or modify FerrisGrid:
+
+```bash
+git clone https://github.com/BrunoV21/FerrisGrid-CLI.git
+cd FerrisGrid-CLI
 cargo build
+cargo test --workspace
 ```
 
 Run the CLI through Cargo:

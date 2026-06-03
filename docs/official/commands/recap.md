@@ -3,7 +3,7 @@
 `recap` generates human-review artifacts from an existing session path.
 
 ```bash
-cargo run -q -p ferrisgrid-cli -- recap .ferrisgrid/session-id
+ferrisgrid recap .ferrisgrid/session-id
 ```
 
 ## Options

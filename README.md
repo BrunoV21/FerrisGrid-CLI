@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="docs/branding/assets/ferrisgrid-banner.png" alt="FerrisGrid - terminal-first visual control for local AI agents" width="100%" />
+  <img src="https://raw.githubusercontent.com/BrunoV21/FerrisGrid-CLI/refs/heads/main/docs/branding/assets/ferrisgrid-banner.png" alt="FerrisGrid - terminal-first visual control for local AI agents" width="100%" />
 
   <p><strong>Turn screens into coordinates, and coordinates into action.</strong></p>
 
@@ -35,24 +35,59 @@ FerrisGrid captures the current screen, maps it to deterministic coordinates, re
 - **Cross-platform shape:** the agent-facing protocol is the same across macOS, Linux, and Windows where the platform allows it.
 - **Container-friendly:** run a Linux desktop workspace in Docker and watch it through noVNC while the agent works away from your main screen.
 
-## Quick Start
+## Installation
 
-Build and check the CLI from source:
+For normal use, install the published CLI with Cargo:
 
 ```bash
-cargo build
-cargo run -q -p ferrisgrid-cli -- doctor
+cargo install ferrisgrid-cli
+ferrisgrid doctor
 ```
+
+The package is [`ferrisgrid-cli`](https://crates.io/crates/ferrisgrid-cli) on crates.io and installs the `ferrisgrid` command.
+
+## Quick Start
 
 Capture the current screen:
 
 ```bash
-cargo run -q -p ferrisgrid-cli -- observe
+ferrisgrid observe
 ```
 
 Run one action from a Markdown action file:
 
 ```bash
+mkdir -p .ferrisgrid
+cat > .ferrisgrid/action.md <<'EOF'
+status: action
+action: click
+screen_id: screen-1
+x: 500
+y: 500
+button: left
+wait_after_ms: 500
+EOF
+
+ferrisgrid act --file .ferrisgrid/action.md
+```
+
+## Development from source
+
+Use a local checkout when you want to build, test, or modify FerrisGrid:
+
+```bash
+git clone https://github.com/BrunoV21/FerrisGrid-CLI.git
+cd FerrisGrid-CLI
+cargo build
+cargo test --workspace
+cargo run -q -p ferrisgrid-cli -- doctor
+cargo run -q -p ferrisgrid-cli -- observe
+```
+
+Run one source-built action from a Markdown action file:
+
+```bash
+mkdir -p .ferrisgrid
 cat > .ferrisgrid/action.md <<'EOF'
 status: action
 action: click

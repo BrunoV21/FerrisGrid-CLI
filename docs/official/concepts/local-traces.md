@@ -23,5 +23,5 @@ Local traces make agent workflows reviewable. A human can inspect the screenshot
 Use `clear` when you intentionally want to remove the output directory:
 
 ```bash
-cargo run -q -p ferrisgrid-cli -- clear --force
+ferrisgrid clear --force
 ```

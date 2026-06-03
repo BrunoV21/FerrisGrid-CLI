@@ -3,7 +3,7 @@
 `act` executes exactly one constrained action and captures the resulting screen state.
 
 ```bash
-cargo run -q -p ferrisgrid-cli -- act --file .ferrisgrid/action.md
+ferrisgrid act --file .ferrisgrid/action.md
 ```
 
 ## Action file

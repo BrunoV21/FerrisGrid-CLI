@@ -3,7 +3,7 @@
 `doctor` reports whether the current environment can capture screens and emit input.
 
 ```bash
-cargo run -q -p ferrisgrid-cli -- doctor
+ferrisgrid doctor
 ```
 
 It prints:

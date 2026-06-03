@@ -3,8 +3,8 @@
 Start with `doctor`, then capture one observation.
 
 ```bash
-cargo run -q -p ferrisgrid-cli -- doctor
-cargo run -q -p ferrisgrid-cli -- observe
+ferrisgrid doctor
+ferrisgrid observe
 ```
 
 The observation output includes:
@@ -34,7 +34,7 @@ EOF
 Run it:
 
 ```bash
-cargo run -q -p ferrisgrid-cli -- act --file .ferrisgrid/action.md
+ferrisgrid act --file .ferrisgrid/action.md
 ```
 
 Use `--dry-run` when you want validation without emitted input.

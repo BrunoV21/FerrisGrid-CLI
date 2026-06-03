@@ -10,20 +10,20 @@ FerrisGrid does not plan tasks or run long autonomous sequences. It gives an ext
 
 ## Requirements
 
-- Rust toolchain for local builds.
+- Rust toolchain for Cargo installs and local builds.
 - Platform permissions for screen capture and input injection.
 - Docker if you want an isolated Linux desktop workspace.
 
-## Build
+## Install
 
 ```bash
-cargo build
+cargo install ferrisgrid-cli
 ```
 
 ## Check the environment
 
 ```bash
-cargo run -q -p ferrisgrid-cli -- doctor
+ferrisgrid doctor
 ```
 
 The doctor command reports OS, capture backend, input backend, output directory, screens, and ffmpeg availability.
@@ -31,7 +31,17 @@ The doctor command reports OS, capture backend, input backend, output directory,
 ## Capture a screen
 
 ```bash
-cargo run -q -p ferrisgrid-cli -- observe
+ferrisgrid observe
 ```
 
 FerrisGrid writes screenshots and metadata under `.ferrisgrid/` unless `FERRISGRID_OUTPUT_DIR` or `--output-dir` changes it.
+
+## Development from source
+
+```bash
+git clone https://github.com/BrunoV21/FerrisGrid-CLI.git
+cd FerrisGrid-CLI
+cargo build
+cargo test --workspace
+cargo run -q -p ferrisgrid-cli -- doctor
+```

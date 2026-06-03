@@ -55,23 +55,33 @@ Computers already show the state an agent needs: pixels, windows, buttons, text 
 
 FerrisGrid gives the machine eyes, gives the model a map, and lets Rust move fast.
 
-## Install from source
+## Install
 
 ```bash
-cargo build
-cargo run -q -p ferrisgrid-cli -- doctor
+cargo install ferrisgrid-cli
+ferrisgrid doctor
 ```
 
 ## First observe/action loop
 
 ```bash
-cargo run -q -p ferrisgrid-cli -- observe
+ferrisgrid observe
 ```
 
 The agent reads the returned screenshot path and coordinate metadata, decides one action, then calls:
 
 ```bash
-cargo run -q -p ferrisgrid-cli -- act --file .ferrisgrid/action.md
+ferrisgrid act --file .ferrisgrid/action.md
+```
+
+## Development from source
+
+```bash
+git clone https://github.com/BrunoV21/FerrisGrid-CLI.git
+cd FerrisGrid-CLI
+cargo build
+cargo test --workspace
+cargo run -q -p ferrisgrid-cli -- doctor
 ```
 
 ## Next steps
