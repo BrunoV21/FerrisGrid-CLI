@@ -3,6 +3,7 @@ import { defineConfig } from 'vitepress'
 export default defineConfig({
   title: 'FerrisGrid',
   description: 'Single-step visual computer control for local agents.',
+  base: '/FerrisGrid-CLI/',
   appearance: 'force-dark',
 
   head: [
