@@ -1,9 +1,11 @@
 [package]
 name = "ferrisgrid-input"
+description = "Constrained mouse and keyboard input backends for FerrisGrid."
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+repository.workspace = true
+readme.workspace = true
 
 [dependencies]
-ferrisgrid-core = { path = "../ferrisgrid-core" }
-
+ferrisgrid-core = { path = "../ferrisgrid-core", version = "0.1.0" }

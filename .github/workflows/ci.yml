@@ -34,6 +34,9 @@ jobs:
       - name: Test
         run: cargo +stable test --workspace --locked
 
+      - name: Package core crate
+        run: cargo +stable package -p ferrisgrid-core --locked
+
       - name: Smoke test CLI
         run: |
           cargo +stable run -q -p ferrisgrid-cli -- doctor --backend fake

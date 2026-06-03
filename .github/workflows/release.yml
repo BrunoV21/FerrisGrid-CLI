@@ -106,7 +106,9 @@ jobs:
   publish:
     name: Publish GitHub release
     runs-on: ubuntu-24.04
-    needs: build
+    needs:
+      - build
+      - crates
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -136,3 +138,81 @@ jobs:
           else
             gh release create "$TAG_NAME" $assets SHA256SUMS --verify-tag --generate-notes
           fi
+
+  crates:
+    name: Publish crates.io crates
+    runs-on: ubuntu-24.04
+    needs: build
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Authenticate to crates.io
+        id: auth
+        uses: rust-lang/crates-io-auth-action@v1
+
+      - name: Publish crates
+        shell: bash
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+          TAG_NAME: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          version="${TAG_NAME#v}"
+          package_version="$(cargo +stable pkgid -p ferrisgrid-core | sed 's/.*#//')"
+          if [ "$version" != "$package_version" ]; then
+            echo "Release tag $TAG_NAME does not match package version $package_version" >&2
+            exit 1
+          fi
+
+          crate_index_path() {
+            local crate="$1"
+            echo "${crate:0:2}/${crate:2:2}/${crate}"
+          }
+
+          is_published() {
+            local crate="$1"
+            local path
+            path="$(crate_index_path "$crate")"
+            curl -fsSL -A "ferrisgrid-release" "https://index.crates.io/${path}" 2>/dev/null \
+              | grep -q "\"vers\":\"${version}\""
+          }
+
+          wait_until_published() {
+            local crate="$1"
+            for attempt in {1..18}; do
+              if is_published "$crate"; then
+                echo "$crate $version is available in the crates.io index"
+                return 0
+              fi
+              echo "Waiting for $crate $version to reach the crates.io index ($attempt/18)"
+              sleep 10
+            done
+            echo "$crate $version was published but did not appear in the index in time" >&2
+            return 1
+          }
+
+          publish_crate() {
+            local crate="$1"
+            if is_published "$crate"; then
+              echo "$crate $version is already published; skipping"
+              return 0
+            fi
+            cargo +stable publish -p "$crate" --locked
+            wait_until_published "$crate"
+          }
+
+          publish_crate ferrisgrid-core
+          publish_crate ferrisgrid-capture
+          publish_crate ferrisgrid-input
+          publish_crate ferrisgrid-export
+          publish_crate ferrisgrid-cli

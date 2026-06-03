@@ -1,8 +1,10 @@
 [package]
 name = "ferrisgrid-core"
+description = "Core protocol, coordinate, session, and action primitives for FerrisGrid."
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+repository.workspace = true
+readme.workspace = true
 
 [dependencies]
-

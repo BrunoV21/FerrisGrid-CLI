@@ -12,5 +12,7 @@ resolver = "3"
 edition = "2024"
 version = "0.1.0"
 license = "MIT"
-repository = "https://example.invalid/ferrisgrid"
-
+repository = "https://github.com/BrunoV21/FerrisGrid-CLI"
+readme = "README.md"
+keywords = ["automation", "screen", "coordinates", "agent", "cli"]
+categories = ["command-line-utilities"]

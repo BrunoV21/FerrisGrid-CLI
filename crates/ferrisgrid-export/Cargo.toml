@@ -1,9 +1,11 @@
 [package]
 name = "ferrisgrid-export"
+description = "Trace recap and media export helpers for FerrisGrid sessions."
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+repository.workspace = true
+readme.workspace = true
 
 [dependencies]
-ferrisgrid-core = { path = "../ferrisgrid-core" }
-
+ferrisgrid-core = { path = "../ferrisgrid-core", version = "0.1.0" }

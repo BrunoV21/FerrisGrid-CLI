@@ -1,9 +1,12 @@
 [package]
 name = "ferrisgrid-capture"
+description = "Screen capture backends and screenshot processing for FerrisGrid."
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+repository.workspace = true
+readme.workspace = true
 
 [dependencies]
-ferrisgrid-core = { path = "../ferrisgrid-core" }
+ferrisgrid-core = { path = "../ferrisgrid-core", version = "0.1.0" }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
