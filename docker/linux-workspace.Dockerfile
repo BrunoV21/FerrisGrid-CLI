@@ -1,9 +1,12 @@
 FROM rust:1-bookworm AS builder
 
-WORKDIR /src
-COPY Cargo.toml Cargo.lock ./
-COPY crates ./crates
-RUN cargo build --release -p ferrisgrid-cli
+ARG FERRISGRID_VERSION
+RUN set -eux; \
+    if [ -n "$FERRISGRID_VERSION" ]; then \
+        cargo install ferrisgrid-cli --version "$FERRISGRID_VERSION" --root /opt/ferrisgrid; \
+    else \
+        cargo install ferrisgrid-cli --root /opt/ferrisgrid; \
+    fi
 
 FROM debian:bookworm-slim
 
@@ -31,7 +34,7 @@ RUN apt-get update \
         xvfb \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /src/target/release/ferrisgrid /usr/local/bin/ferrisgrid
+COPY --from=builder /opt/ferrisgrid/bin/ferrisgrid /usr/local/bin/ferrisgrid
 COPY docker/linux-workspace-entrypoint.sh /usr/local/bin/ferrisgrid-linux-workspace
 
 WORKDIR /workspace

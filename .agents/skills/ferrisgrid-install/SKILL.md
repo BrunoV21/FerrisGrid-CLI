@@ -1,11 +1,11 @@
 ---
 name: ferrisgrid-install
-description: Install, build, and verify FerrisGrid from a local checkout. Use when setting up FerrisGrid, checking prerequisites, building the CLI, or confirming screen/input permissions.
+description: Install and verify the published FerrisGrid CLI from crates.io. Use when setting up FerrisGrid, checking prerequisites, installing the ferrisgrid command, or confirming screen/input permissions.
 ---
 
 # FerrisGrid Install
 
-Use from the FerrisGrid repo root.
+Use this when a machine needs the normal published FerrisGrid CLI. Only use a local checkout when the user explicitly asks for source development.
 
 ## Steps
 
@@ -15,28 +15,32 @@ Use from the FerrisGrid repo root.
 cargo --version
 ```
 
-2. Build the CLI:
+2. Install or update the published CLI from crates.io:
+
+```bash
+cargo install ferrisgrid-cli
+```
+
+3. Confirm the installed binary is available:
+
+```bash
+ferrisgrid doctor
+```
+
+4. Smoke-test capture without touching the real desktop:
+
+```bash
+ferrisgrid observe --backend fake
+```
+
+## Development from source
+
+Use these commands only inside a local FerrisGrid checkout when modifying the project:
 
 ```bash
 cargo build -p ferrisgrid-cli
-```
-
-3. Run tests:
-
-```bash
-cargo test
-```
-
-4. Check the local backend and permissions:
-
-```bash
+cargo test --workspace
 cargo run -q -p ferrisgrid-cli -- doctor
-```
-
-5. Smoke-test capture without touching the real desktop:
-
-```bash
-cargo run -q -p ferrisgrid-cli -- observe --backend fake
 ```
 
 ## Notes

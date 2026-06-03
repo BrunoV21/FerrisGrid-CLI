@@ -6,8 +6,19 @@ Use a macOS VM when the task needs native macOS apps. Docker provides a Linux de
 
 ## Build
 
+The Docker image installs the published `ferrisgrid-cli` package from crates.io. By default it installs the latest published version.
+
 ```bash
 docker build -f docker/linux-workspace.Dockerfile -t ferrisgrid-linux-workspace .
+```
+
+Build a specific published version:
+
+```bash
+docker build \
+  --build-arg FERRISGRID_VERSION=0.1.0 \
+  -f docker/linux-workspace.Dockerfile \
+  -t ferrisgrid-linux-workspace .
 ```
 
 ## Run

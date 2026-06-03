@@ -9,6 +9,12 @@ FerrisGrid is single-step. Do one observe or one action per call, then stop and 
 
 When a task says to use FerrisGrid only, do not use browser automation, page-source fetches, scraping, external search, or host GUI control to inspect or drive the target. Use FerrisGrid observations/actions and inspect the screenshot files returned by FerrisGrid.
 
+If `ferrisgrid` is not installed on the host, install the published CLI first:
+
+```bash
+cargo install ferrisgrid-cli
+```
+
 ## Container Workspace
 
 For the Linux Docker/noVNC workspace, keep the agent terminal on the host and run FerrisGrid inside the container:
@@ -44,19 +50,19 @@ Container-specific checks:
 Capture all screens by default:
 
 ```bash
-cargo run -q -p ferrisgrid-cli -- observe
+ferrisgrid observe
 ```
 
 Capture one screen only:
 
 ```bash
-cargo run -q -p ferrisgrid-cli -- observe --screen-id screen-1
+ferrisgrid observe --screen-id screen-1
 ```
 
 Use smaller images for faster LLM vision:
 
 ```bash
-cargo run -q -p ferrisgrid-cli -- observe --max-image-edge 1280
+ferrisgrid observe --max-image-edge 1280
 ```
 
 ## Coordinates
@@ -74,7 +80,7 @@ Write compact Markdown to an action file, not JSON or prose:
 
 ```bash
 # Update .ferrisgrid/action.md with one compact Markdown action, then run:
-cargo run -q -p ferrisgrid-cli -- act --file .ferrisgrid/action.md
+ferrisgrid act --file .ferrisgrid/action.md
 ```
 
 For the container workspace:

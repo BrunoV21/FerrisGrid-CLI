@@ -115,9 +115,24 @@ Run it from the directory that should receive the skill folders. The script down
 
 FerrisGrid can run inside a Linux container with its own X11 display. The agent calls FerrisGrid with `docker exec`; input happens inside the container, not on your main desktop.
 
+The Docker image installs the published `ferrisgrid-cli` package from crates.io. By default it installs the latest published version; release builds pass the tagged version explicitly.
+
 ```bash
 docker build -f docker/linux-workspace.Dockerfile -t ferrisgrid-linux-workspace .
+```
 
+Build a specific published version:
+
+```bash
+docker build \
+  --build-arg FERRISGRID_VERSION=0.1.0 \
+  -f docker/linux-workspace.Dockerfile \
+  -t ferrisgrid-linux-workspace .
+```
+
+Run the workspace:
+
+```bash
 docker run --rm -d \
   --name ferrisgrid-workspace \
   -p 6080:6080 \
