@@ -1,0 +1,40 @@
+name: Feature request
+description: Suggest a new command, backend, workflow, or integration.
+title: "Feature: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What workflow or limitation should this address?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should FerrisGrid do?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Existing commands, external tools, or workarounds you tried.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - CLI
+        - Capture backend
+        - Input backend
+        - Agent protocol
+        - Docker workspace
+        - Documentation
+        - Release/install
+        - Other
+    validations:
+      required: true

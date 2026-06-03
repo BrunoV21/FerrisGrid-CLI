@@ -151,6 +151,14 @@ npm run docs:dev
 
 The docs use a terminal-brutalist **Terminal Violet** palette: black surfaces, violet brand/action states, cyan coordinate accents, and status colors for execution feedback.
 
+## Community and feedback
+
+- [Bug reports](https://github.com/BrunoV21/FerrisGrid-CLI/issues/new?template=bug_report.yml)
+- [Feature requests](https://github.com/BrunoV21/FerrisGrid-CLI/issues/new?template=feature_request.yml)
+- [Documentation fixes](https://github.com/BrunoV21/FerrisGrid-CLI/issues/new?template=docs.yml)
+- [Questions and usage help](https://github.com/BrunoV21/FerrisGrid-CLI/issues/new?template=question.yml)
+- [Open issues](https://github.com/BrunoV21/FerrisGrid-CLI/issues)
+
 ## Project Status
 
 FerrisGrid is early, local-first infrastructure for agent-facing visual control. The current focus is reliable observe/act behavior, local traces, recap output, and containerized Linux workspaces.

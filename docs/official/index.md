@@ -18,6 +18,9 @@ hero:
     - theme: alt
       text: "Architecture"
       link: /concepts/architecture
+    - theme: alt
+      text: "GitHub"
+      link: https://github.com/BrunoV21/FerrisGrid-CLI
 
 features:
   - title: "Single-step execution"
@@ -89,3 +92,4 @@ cargo run -q -p ferrisgrid-cli -- doctor
 1. Read the [getting started guide](./getting-started/).
 2. Learn the [command surface](./commands/).
 3. Run FerrisGrid inside a [Docker Linux workspace](./workspaces/docker.md).
+4. Open [issues and feature requests](./community.md) on GitHub.

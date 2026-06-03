@@ -1,0 +1,63 @@
+name: Bug report
+description: Report a crash, incorrect output, or platform-specific failure.
+title: "Bug: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a FerrisGrid bug. Include enough detail to reproduce the behavior.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Commands, action files, or setup steps that trigger the issue.
+      placeholder: |
+        1. Run `ferrisgrid doctor`
+        2. Run `ferrisgrid observe`
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Paste relevant output, logs, or error text.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: FerrisGrid version
+      placeholder: "ferrisgrid --version or cargo package version"
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Linux
+        - Windows
+        - Docker Linux workspace
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Screenshots, environment variables, backend selection, or permission details.

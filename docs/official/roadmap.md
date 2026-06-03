@@ -18,6 +18,10 @@ FerrisGrid is early infrastructure. The immediate path is reliability before bre
 - Packaged installs for agent runtimes.
 - Expanded examples for Codex, Cursor, Claude Code, and other local tool callers.
 
+## Feedback
+
+Open GitHub issues for [bugs](https://github.com/BrunoV21/FerrisGrid-CLI/issues/new?template=bug_report.yml), [feature requests](https://github.com/BrunoV21/FerrisGrid-CLI/issues/new?template=feature_request.yml), [documentation fixes](https://github.com/BrunoV21/FerrisGrid-CLI/issues/new?template=docs.yml), or [usage questions](https://github.com/BrunoV21/FerrisGrid-CLI/issues/new?template=question.yml).
+
 ## Non-goals
 
 FerrisGrid is not a full RPA platform, browser automation replacement, hosted automation service, or stealth automation tool.
