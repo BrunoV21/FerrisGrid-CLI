@@ -6,6 +6,13 @@
 ferrisgrid doctor
 ```
 
+## Options
+
+| Option | Purpose |
+| --- | --- |
+| `--output-dir <path>` | Create/check a specific FerrisGrid output directory. Defaults to `.ferrisgrid`. |
+| `--backend <name>` | Select capture/input backends. |
+
 It prints:
 
 - OS

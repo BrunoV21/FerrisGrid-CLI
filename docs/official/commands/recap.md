@@ -10,7 +10,8 @@ ferrisgrid recap .ferrisgrid/session-id
 
 | Option | Purpose |
 | --- | --- |
-| `--video mp4|gif` | Request a video artifact when supported. |
-| `--framerate <fps>` | Set recap video frame rate. |
+| `--video mp4` | Request an MP4 video artifact. |
+| `--framerate <fps>` | Set recap video frame rate. Defaults to 2. |
+| `--fps <fps>` | Alias for `--framerate`. |
 
 Recaps are built from existing traces. They are not part of the normal observe/act execution loop.
