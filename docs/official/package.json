@@ -1,7 +1,7 @@
 {
   "name": "ferrisgrid-docs",
   "homepage": "https://BrunoV21.github.io/FerrisGrid-CLI/",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "scripts": {
     "docs:dev": "vitepress dev",
     "docs:build": "vitepress build",
