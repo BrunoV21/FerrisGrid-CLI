@@ -22,9 +22,50 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  release-notes:
+    name: Validate release notes
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Validate tagged release notes
+        env:
+          TAG_NAME: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          notes_file="docs/official/releases/${TAG_NAME}.md"
+          body_file="/tmp/github-release-notes.md"
+
+          if [ ! -f "$notes_file" ]; then
+            echo "Missing release notes file: $notes_file" >&2
+            exit 1
+          fi
+
+          awk '
+            /<!-- release-notes:start -->/ { emit=1; next }
+            /<!-- release-notes:end -->/ { emit=0 }
+            emit { print }
+          ' "$notes_file" > "$body_file"
+
+          if ! grep -q '[^[:space:]]' "$body_file"; then
+            echo "Release notes file must contain non-empty content between release-notes markers" >&2
+            exit 1
+          fi
+
+          github_release_url="https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG_NAME}"
+          if ! grep -Fq "$github_release_url" "$body_file"; then
+            echo "Release notes file must link to $github_release_url" >&2
+            exit 1
+          fi
+
   build:
     name: Build ${{ matrix.asset }}
     runs-on: ${{ matrix.runner }}
+    needs:
+      - release-notes
     strategy:
       fail-fast: false
       matrix:
@@ -126,17 +167,43 @@ jobs:
           find release-artifacts -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
           cat SHA256SUMS
 
+      - name: Extract release notes
+        env:
+          TAG_NAME: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          notes_file="docs/official/releases/${TAG_NAME}.md"
+          body_file="/tmp/github-release-notes.md"
+
+          if [ ! -f "$notes_file" ]; then
+            echo "Missing release notes file: $notes_file" >&2
+            exit 1
+          fi
+
+          awk '
+            /<!-- release-notes:start -->/ { emit=1; next }
+            /<!-- release-notes:end -->/ { emit=0 }
+            emit { print }
+          ' "$notes_file" > "$body_file"
+
+          if ! grep -q '[^[:space:]]' "$body_file"; then
+            echo "Release notes file must contain non-empty content between release-notes markers" >&2
+            exit 1
+          fi
+
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG_NAME: ${{ inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
+          body_file="/tmp/github-release-notes.md"
           assets="$(find release-artifacts -type f | sort)"
           if gh release view "$TAG_NAME" >/dev/null 2>&1; then
             gh release upload "$TAG_NAME" $assets SHA256SUMS --clobber
+            gh release edit "$TAG_NAME" --notes-file "$body_file"
           else
-            gh release create "$TAG_NAME" $assets SHA256SUMS --verify-tag --generate-notes
+            gh release create "$TAG_NAME" $assets SHA256SUMS --verify-tag --title "$TAG_NAME" --notes-file "$body_file"
           fi
 
   crates:
