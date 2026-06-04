@@ -22,6 +22,7 @@ export default defineConfig({
       { text: 'Commands', link: '/commands/' },
       { text: 'Workspaces', link: '/workspaces/docker' },
       { text: 'Concepts', link: '/concepts/architecture' },
+      { text: 'Releases', link: '/releases/' },
       { text: 'Community', link: '/community' },
       { text: 'Roadmap', link: '/roadmap' }
     ],
@@ -63,6 +64,7 @@ export default defineConfig({
       {
         text: '// MORE',
         items: [
+          { text: 'Releases', link: '/releases/' },
           { text: 'Community', link: '/community' },
           { text: 'Roadmap', link: '/roadmap' }
         ]

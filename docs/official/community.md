@@ -13,4 +13,5 @@ FerrisGrid development happens on GitHub.
 
 - [Repository](https://github.com/BrunoV21/FerrisGrid-CLI)
 - [Open issues](https://github.com/BrunoV21/FerrisGrid-CLI/issues)
-- [Releases](https://github.com/BrunoV21/FerrisGrid-CLI/releases)
+- [Release notes](./releases/)
+- [GitHub releases](https://github.com/BrunoV21/FerrisGrid-CLI/releases)
