@@ -391,6 +391,52 @@ html {
   color: var(--fg-lime);
 }
 
+.agent-docs-banner {
+  align-items: center;
+  border-bottom: 1px solid var(--fg-border);
+  border-top: 1px solid var(--fg-border);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  justify-content: center;
+  margin: 0 auto 24px;
+  max-width: 1280px;
+  padding: 12px 24px;
+  width: 100%;
+}
+
+.agent-docs-banner__label {
+  color: var(--fg-lime);
+  font-family: var(--fg-font);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.agent-docs-banner__text {
+  color: var(--fg-text-primary);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.agent-docs-banner a {
+  border: 1px solid var(--fg-cyan);
+  color: var(--fg-cyan);
+  font-family: var(--fg-font);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  padding: 7px 10px;
+  text-decoration: none;
+  text-transform: uppercase;
+}
+
+.agent-docs-banner a:hover {
+  background: rgba(34, 211, 238, 0.1);
+  color: var(--fg-text-primary);
+}
+
 .raw-markdown-link {
   margin-bottom: 24px;
 }
