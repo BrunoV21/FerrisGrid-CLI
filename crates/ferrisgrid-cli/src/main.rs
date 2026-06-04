@@ -22,6 +22,12 @@ macro_rules! docs_url {
     };
 }
 
+macro_rules! agent_docs_url {
+    () => {
+        "https://raw.githubusercontent.com/BrunoV21/FerrisGrid-CLI/main/docs/official/agents.md"
+    };
+}
+
 fn main() {
     if let Err(error) = run() {
         eprintln!(
@@ -594,13 +600,17 @@ const ROOT_HELP: &str = concat!(
     "  4. Run `ferrisgrid act --file .ferrisgrid/action.md`.\n",
     "  5. Inspect the returned post-action screenshot path and repeat.\n",
     "\n",
-    "Docs:\n",
+    "Docs for humans:\n",
     "  ",
     docs_url!(),
     "\n",
     "  Commands: ",
     docs_url!(),
     "commands/\n",
+    "Docs for agents:\n",
+    "  ",
+    agent_docs_url!(),
+    "\n",
     "\n",
     "Usage:\n",
     "  ferrisgrid observe [options]\n",
@@ -924,7 +934,12 @@ mod tests {
         assert!(help.contains("Agent loop:"));
         assert!(help.contains("Coordinate protocol:"));
         assert!(help.contains("Action Markdown summary:"));
+        assert!(help.contains("Docs for humans:"));
+        assert!(help.contains("Docs for agents:"));
         assert!(help.contains("https://brunov21.github.io/FerrisGrid-CLI/"));
+        assert!(help.contains(
+            "https://raw.githubusercontent.com/BrunoV21/FerrisGrid-CLI/main/docs/official/agents.md"
+        ));
     }
 
     #[test]
