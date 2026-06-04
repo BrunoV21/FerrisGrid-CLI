@@ -2,8 +2,9 @@ FROM rust:1-bookworm AS builder
 
 ARG FERRISGRID_VERSION
 RUN set -eux; \
-    if [ -n "$FERRISGRID_VERSION" ]; then \
-        cargo install ferrisgrid-cli --version "$FERRISGRID_VERSION" --root /opt/ferrisgrid; \
+    version="${FERRISGRID_VERSION:-}"; \
+    if [ -n "$version" ]; then \
+        cargo install ferrisgrid-cli --version "$version" --root /opt/ferrisgrid; \
     else \
         cargo install ferrisgrid-cli --root /opt/ferrisgrid; \
     fi
