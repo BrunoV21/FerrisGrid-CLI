@@ -189,9 +189,11 @@ pub struct ObserveResult {
 pub struct ActRequest {
     pub output_dir: PathBuf,
     pub session: Option<String>,
+    pub default_screen_id: Option<String>,
     pub input_markdown: String,
     pub dry_run: bool,
     pub format: ImageFormat,
+    pub grid_overlay: bool,
     pub image_size_limit: ImageSizeLimit,
 }
 
@@ -307,6 +309,32 @@ impl ActionKind {
             | Self::Scroll { screen_id, .. } => screen_id.as_deref(),
             Self::Type { .. } | Self::PressKey { .. } | Self::Hotkey { .. } | Self::Wait { .. } => {
                 None
+            }
+        }
+    }
+
+    fn accepts_screen_id(&self) -> bool {
+        matches!(
+            self,
+            Self::Click { .. }
+                | Self::DoubleClick { .. }
+                | Self::RightClick { .. }
+                | Self::MoveMouse { .. }
+                | Self::Drag { .. }
+                | Self::Scroll { .. }
+        )
+    }
+
+    fn requires_screen_id(&self) -> bool {
+        match self {
+            Self::Click { .. }
+            | Self::DoubleClick { .. }
+            | Self::RightClick { .. }
+            | Self::MoveMouse { .. }
+            | Self::Drag { .. } => true,
+            Self::Scroll { x, y, .. } => x.is_some() || y.is_some(),
+            Self::Type { .. } | Self::PressKey { .. } | Self::Hotkey { .. } | Self::Wait { .. } => {
+                false
             }
         }
     }
@@ -740,19 +768,27 @@ fn act_inner(
     let screens = capture
         .list_screens()
         .map_err(|error| (error, ErrorContext::with_session(session_dir.clone())))?;
-    let resolved_screen = resolve_action_screen(kind.screen_id(), &screens).map_err(|error| {
-        let mut context = ErrorContext::with_session(session_dir.clone());
-        context.available_screens = capture_latest_screens(
-            &store,
-            &session_dir,
-            step,
-            capture,
-            &request.format,
-            request.image_size_limit,
-        )
-        .unwrap_or_default();
-        (error, context)
-    })?;
+    let requested_screen_id = kind
+        .screen_id()
+        .or(request.default_screen_id.as_deref())
+        .filter(|_| kind.accepts_screen_id());
+    let resolved_screen = if kind.requires_screen_id() || requested_screen_id.is_some() {
+        resolve_action_screen(requested_screen_id, &screens).map_err(|error| {
+            let mut context = ErrorContext::with_session(session_dir.clone());
+            context.available_screens = capture_latest_screens(
+                &store,
+                &session_dir,
+                step,
+                capture,
+                &request.format,
+                request.image_size_limit,
+            )
+            .unwrap_or_default();
+            (error, context)
+        })?
+    } else {
+        None
+    };
 
     let resolved_kind = kind.with_screen_id(
         resolved_screen
@@ -788,7 +824,7 @@ fn act_inner(
         target,
         &frame_dir,
         &request.format,
-        true,
+        request.grid_overlay,
         request.image_size_limit,
     ) {
         Ok(captured) => captured,
@@ -944,6 +980,11 @@ pub fn render_action_result(result: &ActResult) -> String {
         out.push_str(&format!("- wait_after_ms: {}\n", result.wait_after_ms));
     }
     out.push_str(&format!("- result: {}\n", result.result));
+    out.push_str(&format!("- screens: {}\n", result.screens.len()));
+    if result.screens.is_empty() {
+        out.push_str("- note: no post-action screenshot captured for terminal status\n");
+        return out;
+    }
     out.push_str("- coordinate_mode: normalized-1000\n");
     out.push_str(&format!(
         "- image_size_limit: {}\n",
@@ -952,14 +993,27 @@ pub fn render_action_result(result: &ActResult) -> String {
     out.push_str("- coordinate_range: x=0..1000 y=0..1000 origin=top_left scope=screen_local\n");
     for screen in &result.screens {
         out.push_str(&format!(
-            "- screen: {} image={}x{} native={}x{} screenshot={} metadata={}\n",
+            "- screen: {} primary={} image={}x{} native={}x{} origin={},{} coords=x:0..1000,y:0..1000 screenshot={} metadata={}\n",
             screen.screen.screen_id,
+            screen.screen.is_primary,
             screen.image_width,
             screen.image_height,
             screen.screen.native_width,
             screen.screen.native_height,
+            screen.screen.origin_x,
+            screen.screen.origin_y,
             screen.screenshot_path.display(),
             screen.metadata_path.display()
+        ));
+        out.push_str(&format!(
+            "- map: {} image_x=round(x/1000*{}) image_y=round(y/1000*{}) native_x={}+round(x/1000*{}) native_y={}+round(y/1000*{})\n",
+            screen.screen.screen_id,
+            screen.image_width.saturating_sub(1),
+            screen.image_height.saturating_sub(1),
+            screen.screen.origin_x,
+            screen.screen.native_width,
+            screen.screen.origin_y,
+            screen.screen.native_height
         ));
     }
     out
@@ -1194,8 +1248,15 @@ fn validate_policy(action: &ActionKind) -> Result<()> {
             delta_y,
             ..
         } => {
-            if let (Some(x), Some(y)) = (x, y) {
-                validate_agent_point(*x, *y)?;
+            match (x, y) {
+                (Some(x), Some(y)) => validate_agent_point(*x, *y)?,
+                (None, None) => {}
+                _ => {
+                    return Err(FerrisError::new(
+                        ErrorKind::Protocol,
+                        "scroll x and y must be supplied together",
+                    ));
+                }
             }
             if delta_x.abs() > 2_000 || delta_y.abs() > 2_000 {
                 return Err(FerrisError::new(
@@ -1546,6 +1607,87 @@ fn unix_millis() -> u128 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    struct TestCaptureBackend;
+
+    impl CaptureBackend for TestCaptureBackend {
+        fn name(&self) -> &'static str {
+            "test"
+        }
+
+        fn list_screens(&self) -> Result<Vec<ScreenInfo>> {
+            Ok(vec![
+                screen(),
+                ScreenInfo {
+                    screen_id: "screen-2".to_string(),
+                    name: "Test 2".to_string(),
+                    is_primary: false,
+                    origin_x: 3024,
+                    origin_y: 0,
+                    native_width: 2560,
+                    native_height: 1440,
+                    scale_factor: 1.0,
+                },
+            ])
+        }
+
+        fn capture(
+            &self,
+            target: CaptureTarget,
+            frame_dir: &Path,
+            format: &ImageFormat,
+            _grid_overlay: bool,
+            _image_size_limit: ImageSizeLimit,
+        ) -> Result<Vec<CapturedScreen>> {
+            let screens = self.list_screens()?;
+            let selected: Vec<ScreenInfo> = match target {
+                CaptureTarget::All => screens,
+                CaptureTarget::Screen(id) => screens
+                    .into_iter()
+                    .filter(|screen| screen.screen_id == id)
+                    .collect(),
+            };
+            Ok(selected
+                .into_iter()
+                .map(|screen| CapturedScreen {
+                    screenshot_path: frame_dir.join(format!(
+                        "{}.{}",
+                        screen.screen_id,
+                        format.extension()
+                    )),
+                    metadata_path: frame_dir.join(format!("{}.meta.md", screen.screen_id)),
+                    image_width: 800,
+                    image_height: 520,
+                    screen,
+                })
+                .collect())
+        }
+    }
+
+    struct TestInputBackend;
+
+    impl InputBackend for TestInputBackend {
+        fn name(&self) -> &'static str {
+            "test"
+        }
+
+        fn capabilities(&self) -> InputCapabilities {
+            InputCapabilities {
+                can_mouse: true,
+                can_keyboard: true,
+            }
+        }
+
+        fn execute(&self, action: &NativeAction) -> Result<InputExecution> {
+            Ok(InputExecution {
+                summary: format!("{action:?}"),
+            })
+        }
+    }
 
     fn screen() -> ScreenInfo {
         ScreenInfo {
@@ -1557,6 +1699,38 @@ mod tests {
             native_width: 3024,
             native_height: 1964,
             scale_factor: 2.0,
+        }
+    }
+
+    fn temp_output_dir(name: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let counter = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "ferrisgrid-core-test-{name}-{}-{nonce}-{counter}",
+            std::process::id()
+        ))
+    }
+
+    fn create_test_session(output_dir: &Path) {
+        let store = SessionStore::new(output_dir);
+        let session = store.create_session().unwrap();
+        let frame_dir = store.frame_dir(&session, 1).unwrap();
+        fs::write(frame_dir.join("screen-1.jpg"), "test").unwrap();
+    }
+
+    fn test_act_request(output_dir: PathBuf, input_markdown: &str) -> ActRequest {
+        ActRequest {
+            output_dir,
+            session: None,
+            default_screen_id: None,
+            input_markdown: input_markdown.to_string(),
+            dry_run: true,
+            format: ImageFormat::Jpg,
+            grid_overlay: false,
+            image_size_limit: ImageSizeLimit::FixedMaxEdge(800),
         }
     }
 
@@ -1616,5 +1790,64 @@ mod tests {
             },
         ];
         assert!(resolve_action_screen(None, &screens).is_err());
+    }
+
+    #[test]
+    fn multi_screen_wait_does_not_require_screen_id() {
+        let output_dir = temp_output_dir("wait-no-screen");
+        create_test_session(&output_dir);
+        let result = act(
+            test_act_request(output_dir.clone(), "action: wait\nduration_ms: 1\n"),
+            &TestCaptureBackend,
+            &TestInputBackend,
+        )
+        .unwrap();
+
+        assert_eq!(result.action_summary, "wait duration_ms=1");
+        assert_eq!(result.screens.len(), 2);
+        let _ = fs::remove_dir_all(output_dir);
+    }
+
+    #[test]
+    fn default_screen_id_disambiguates_pointer_action() {
+        let output_dir = temp_output_dir("default-screen");
+        create_test_session(&output_dir);
+        let mut request = test_act_request(output_dir.clone(), "action: click\nx: 500\ny: 500\n");
+        request.default_screen_id = Some("screen-1".to_string());
+
+        let result = act(request, &TestCaptureBackend, &TestInputBackend).unwrap();
+
+        assert!(result.action_summary.contains("click screen_id=screen-1"));
+        assert_eq!(result.screens.len(), 1);
+        assert_eq!(result.screens[0].screen.screen_id, "screen-1");
+        let _ = fs::remove_dir_all(output_dir);
+    }
+
+    #[test]
+    fn rejects_partial_scroll_point() {
+        let action = parse_action_block("action: scroll\nx: 500\ndelta_y: -120\n").unwrap();
+
+        let error = validate_policy(&action.kind.unwrap()).unwrap_err();
+
+        assert_eq!(error.kind, ErrorKind::Protocol);
+        assert!(error.message.contains("x and y"));
+    }
+
+    #[test]
+    fn terminal_action_result_reports_no_screens() {
+        let rendered = render_action_result(&ActResult {
+            session_dir: PathBuf::from(".ferrisgrid/sessions/test"),
+            step: 2,
+            action_summary: "done".to_string(),
+            wait_after_ms: 0,
+            result: "done".to_string(),
+            dry_run: false,
+            image_size_limit: ImageSizeLimit::FixedMaxEdge(800),
+            screens: Vec::new(),
+        });
+
+        assert!(rendered.contains("- screens: 0"));
+        assert!(rendered.contains("no post-action screenshot"));
+        assert!(!rendered.contains("- coordinate_mode:"));
     }
 }

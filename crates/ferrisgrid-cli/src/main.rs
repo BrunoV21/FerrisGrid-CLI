@@ -16,6 +16,12 @@ const BALANCED_MIN_LONG_EDGE: u32 = 800;
 const BALANCED_MIN_SHORT_EDGE: u32 = 500;
 const DETAIL_IMAGE_EDGE: u32 = 1920;
 
+macro_rules! docs_url {
+    () => {
+        "https://brunov21.github.io/FerrisGrid-CLI/"
+    };
+}
+
 fn main() {
     if let Err(error) = run() {
         eprintln!(
@@ -30,18 +36,42 @@ fn main() {
 fn run() -> ferrisgrid_core::Result<()> {
     let mut args: Vec<String> = env::args().skip(1).collect();
     if args.is_empty() {
-        print_help();
+        print_help(HelpTopic::Root);
         return Ok(());
     }
     let command = args.remove(0);
     match command.as_str() {
+        "observe" if is_help_request(&args) => {
+            print_help(HelpTopic::Observe);
+            Ok(())
+        }
         "observe" => command_observe(args),
+        "act" if is_help_request(&args) => {
+            print_help(HelpTopic::Act);
+            Ok(())
+        }
         "act" => command_act(args),
+        "doctor" if is_help_request(&args) => {
+            print_help(HelpTopic::Doctor);
+            Ok(())
+        }
         "doctor" => command_doctor(args),
+        "recap" if is_help_request(&args) => {
+            print_help(HelpTopic::Recap);
+            Ok(())
+        }
         "recap" => command_recap(args),
+        "clear" if is_help_request(&args) => {
+            print_help(HelpTopic::Clear);
+            Ok(())
+        }
         "clear" => command_clear(args),
         "-h" | "--help" | "help" => {
-            print_help();
+            let topic = match args.first() {
+                Some(value) => parse_help_topic(value)?,
+                None => HelpTopic::Root,
+            };
+            print_help(topic);
             Ok(())
         }
         other => Err(ferrisgrid_core::FerrisError::new(
@@ -51,8 +81,39 @@ fn run() -> ferrisgrid_core::Result<()> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HelpTopic {
+    Root,
+    Observe,
+    Act,
+    Doctor,
+    Recap,
+    Clear,
+}
+
+fn is_help_request(args: &[String]) -> bool {
+    args.iter()
+        .any(|arg| matches!(arg.as_str(), "-h" | "--help" | "help"))
+}
+
+fn parse_help_topic(value: &str) -> ferrisgrid_core::Result<HelpTopic> {
+    match value {
+        "observe" => Ok(HelpTopic::Observe),
+        "act" => Ok(HelpTopic::Act),
+        "doctor" => Ok(HelpTopic::Doctor),
+        "recap" => Ok(HelpTopic::Recap),
+        "clear" => Ok(HelpTopic::Clear),
+        "-h" | "--help" | "help" => Ok(HelpTopic::Root),
+        other => Err(ferrisgrid_core::FerrisError::new(
+            ferrisgrid_core::ErrorKind::Protocol,
+            format!("unknown help topic: {other}"),
+        )),
+    }
+}
+
 fn command_observe(args: Vec<String>) -> ferrisgrid_core::Result<()> {
     let options = Options::parse(args)?;
+    reject_act_only_options_for_observe(&options)?;
     let capture = capture_backend(&options.backend);
     let result = observe(
         ObserveRequest {
@@ -85,9 +146,11 @@ fn command_act(args: Vec<String>) -> ferrisgrid_core::Result<()> {
         ActRequest {
             output_dir: options.output_dir,
             session: options.session,
+            default_screen_id: options.screen_id,
             input_markdown,
             dry_run: options.dry_run,
             format: options.format,
+            grid_overlay: options.grid_overlay,
             image_size_limit: options.image_size_limit,
         },
         capture.as_ref(),
@@ -105,7 +168,7 @@ fn command_act(args: Vec<String>) -> ferrisgrid_core::Result<()> {
 }
 
 fn command_doctor(args: Vec<String>) -> ferrisgrid_core::Result<()> {
-    let options = Options::parse(args)?;
+    let options = DoctorCommandOptions::parse(&args)?;
     let capture = capture_backend(&options.backend);
     let input = input_backend(&options.backend);
     let store = SessionStore::new(&options.output_dir);
@@ -170,6 +233,22 @@ fn command_clear(args: Vec<String>) -> ferrisgrid_core::Result<()> {
     Ok(())
 }
 
+fn reject_act_only_options_for_observe(options: &Options) -> ferrisgrid_core::Result<()> {
+    if options.dry_run {
+        return Err(ferrisgrid_core::FerrisError::new(
+            ferrisgrid_core::ErrorKind::Protocol,
+            "--dry-run is only supported by ferrisgrid act",
+        ));
+    }
+    if options.file.is_some() {
+        return Err(ferrisgrid_core::FerrisError::new(
+            ferrisgrid_core::ErrorKind::Protocol,
+            "--file is only supported by ferrisgrid act",
+        ));
+    }
+    Ok(())
+}
+
 #[derive(Debug)]
 struct ClearCommandOptions {
     output_dir: PathBuf,
@@ -198,6 +277,44 @@ impl ClearCommandOptions {
                     return Err(ferrisgrid_core::FerrisError::new(
                         ferrisgrid_core::ErrorKind::Protocol,
                         format!("unknown clear flag: {other}"),
+                    ));
+                }
+            }
+            index += 1;
+        }
+        Ok(options)
+    }
+}
+
+#[derive(Debug)]
+struct DoctorCommandOptions {
+    output_dir: PathBuf,
+    backend: String,
+}
+
+impl DoctorCommandOptions {
+    fn parse(args: &[String]) -> ferrisgrid_core::Result<Self> {
+        let mut options = Self {
+            output_dir: env::var("FERRISGRID_OUTPUT_DIR")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| PathBuf::from(".ferrisgrid")),
+            backend: env::var("FERRISGRID_BACKEND").unwrap_or_else(|_| "native".to_string()),
+        };
+        let mut index = 0;
+        while index < args.len() {
+            match args[index].as_str() {
+                "--output-dir" => {
+                    index += 1;
+                    options.output_dir = PathBuf::from(value(args, index, "--output-dir")?);
+                }
+                "--backend" => {
+                    index += 1;
+                    options.backend = value(args, index, "--backend")?.to_string();
+                }
+                other => {
+                    return Err(ferrisgrid_core::FerrisError::new(
+                        ferrisgrid_core::ErrorKind::Protocol,
+                        format!("unknown doctor flag: {other}"),
                     ));
                 }
             }
@@ -330,10 +447,6 @@ impl Options {
                     index += 1;
                     options.file = Some(PathBuf::from(value(&args, index, "--file")?));
                 }
-                "--quality" | "--grid-step" | "--grid-labels" | "--grid-opacity" => {
-                    index += 1;
-                    let _ = value(&args, index, args[index - 1].as_str())?;
-                }
                 other => {
                     return Err(ferrisgrid_core::FerrisError::new(
                         ferrisgrid_core::ErrorKind::Protocol,
@@ -454,11 +567,311 @@ fn has_ffmpeg() -> bool {
         .unwrap_or(false)
 }
 
-fn print_help() {
-    println!(
-        "FerrisGrid\n\nCommands:\n  ferrisgrid observe [--backend native|native-linux-x11|native-macos|fake] [--screen-id screen-1] [--grid-overlay true|false] [--resolution fast|balanced|detail|native] [--max-image-edge 800|native]\n  ferrisgrid act [--backend native|native-linux-x11|native-macos|fake] [--file action.md] [--dry-run] [--resolution fast|balanced|detail|native] [--max-image-edge 800|native]\n  ferrisgrid doctor [--backend native|native-linux-x11|native-macos|fake]\n  ferrisgrid recap <session_path> [--video mp4] [--framerate 2]\n  ferrisgrid clear [--output-dir .ferrisgrid] [--force]\n"
-    );
+fn print_help(topic: HelpTopic) {
+    print!("{}", help_text(topic));
 }
+
+fn help_text(topic: HelpTopic) -> &'static str {
+    match topic {
+        HelpTopic::Root => ROOT_HELP,
+        HelpTopic::Observe => OBSERVE_HELP,
+        HelpTopic::Act => ACT_HELP,
+        HelpTopic::Doctor => DOCTOR_HELP,
+        HelpTopic::Recap => RECAP_HELP,
+        HelpTopic::Clear => CLEAR_HELP,
+    }
+}
+
+const ROOT_HELP: &str = concat!(
+    "FerrisGrid\n",
+    "\n",
+    "Single-step visual computer control for local agents.\n",
+    "\n",
+    "Agent loop:\n",
+    "  1. Run `ferrisgrid observe`.\n",
+    "  2. Inspect the screenshot path and coordinate metadata from stdout.\n",
+    "  3. Write one compact Markdown action file.\n",
+    "  4. Run `ferrisgrid act --file .ferrisgrid/action.md`.\n",
+    "  5. Inspect the returned post-action screenshot path and repeat.\n",
+    "\n",
+    "Docs:\n",
+    "  ",
+    docs_url!(),
+    "\n",
+    "  Commands: ",
+    docs_url!(),
+    "commands/\n",
+    "\n",
+    "Usage:\n",
+    "  ferrisgrid observe [options]\n",
+    "  ferrisgrid act [options] [--file action.md]\n",
+    "  ferrisgrid doctor [options]\n",
+    "  ferrisgrid recap <session_path> [options]\n",
+    "  ferrisgrid clear [options]\n",
+    "  ferrisgrid help [observe|act|doctor|recap|clear]\n",
+    "\n",
+    "Command help:\n",
+    "  ferrisgrid observe --help\n",
+    "  ferrisgrid act --help\n",
+    "  ferrisgrid doctor --help\n",
+    "  ferrisgrid recap --help\n",
+    "  ferrisgrid clear --help\n",
+    "\n",
+    "Common output/capture options:\n",
+    "  --output-dir <path>            Trace root. Default: .ferrisgrid\n",
+    "  --backend <name>               native, native-linux-x11, native-macos, fake.\n",
+    "  --format <jpg|png>             Screenshot format. Default: jpg.\n",
+    "  --grid-overlay <true|false>    Stamp coordinate grid on screenshots. Default: true.\n",
+    "  --resolution <preset|pixels>   fast, balanced, detail, native, or max edge pixels.\n",
+    "  --max-image-edge <pixels|native>\n",
+    "  --no-downsample                Keep native screenshot dimensions.\n",
+    "\n",
+    "Environment defaults:\n",
+    "  FERRISGRID_OUTPUT_DIR          Default trace root.\n",
+    "  FERRISGRID_DEFAULT_SCREEN_ID   Default observe screen and act pointer-action target.\n",
+    "  FERRISGRID_MAX_IMAGE_EDGE      Default max edge or native.\n",
+    "  FERRISGRID_BACKEND             Default backend name.\n",
+    "\n",
+    "Session behavior:\n",
+    "  - observe creates a new session or creates/resumes `--session <name-or-path>`.\n",
+    "  - act uses `--session <name-or-path>` or the latest existing session. Run observe first.\n",
+    "\n",
+    "Coordinate protocol:\n",
+    "  - stdout declares coordinate_mode, range, screen IDs, screenshot paths, and metadata paths.\n",
+    "  - Use normalized-1000 coordinates: x=0 y=0 is top-left, x=1000 y=1000 is bottom-right.\n",
+    "  - Coordinates are screen-local. Include screen_id when multiple screens are listed.\n",
+    "  - For clean screenshots, pass `--grid-overlay false` to observe and act.\n",
+    "\n",
+    "Action Markdown summary:\n",
+    "  status: action\n",
+    "  action: click | double_click | right_click | move_mouse | drag | scroll | type | press_key | hotkey | wait\n",
+    "  screen_id: screen-1            For pointer actions; required on multi-screen systems unless act --screen-id is set.\n",
+    "  wait_after_ms: 500             Optional. Max 30000. Captures after waiting.\n",
+    "\n",
+    "Minimal action file:\n",
+    "  status: action\n",
+    "  action: click\n",
+    "  screen_id: screen-1\n",
+    "  x: 500\n",
+    "  y: 500\n",
+    "  button: left\n",
+    "  wait_after_ms: 500\n",
+    "\n",
+    "Examples:\n",
+    "  ferrisgrid doctor\n",
+    "  ferrisgrid observe --grid-overlay false --resolution detail\n",
+    "  ferrisgrid act --file .ferrisgrid/action.md --grid-overlay false\n",
+    "  ferrisgrid recap .ferrisgrid/sessions/<session_id> --video mp4\n",
+);
+
+const OBSERVE_HELP: &str = concat!(
+    "FerrisGrid observe\n",
+    "\n",
+    "Capture the current desktop state and print agent-readable Markdown with screenshot paths,\n",
+    "screen metadata, and normalized coordinate mapping.\n",
+    "\n",
+    "Docs: ",
+    docs_url!(),
+    "commands/observe.html\n",
+    "\n",
+    "Usage:\n",
+    "  ferrisgrid observe [options]\n",
+    "\n",
+    "Options:\n",
+    "  --output-dir <path>            Trace root. Default: .ferrisgrid\n",
+    "  --session <name-or-path>       Create or resume a named session.\n",
+    "  --screen-id <screen-id>        Capture only one screen, for example screen-1.\n",
+    "  --backend <name>               native, native-linux-x11, native-macos, fake.\n",
+    "  --format <jpg|png>             Screenshot format. Default: jpg.\n",
+    "  --grid-overlay <true|false>    Stamp coordinate grid on screenshots. Default: true.\n",
+    "  --resolution <preset|pixels>   fast, balanced, detail, native, or max edge pixels.\n",
+    "  --max-image-edge <pixels|native>\n",
+    "  --no-downsample                Keep native screenshot dimensions.\n",
+    "  -h, --help                     Show this help.\n",
+    "\n",
+    "Output contract:\n",
+    "  - session: local session directory.\n",
+    "  - step: frame number within the session.\n",
+    "  - coordinate_mode: normalized-1000.\n",
+    "  - screen lines include screen_id, image size, native size, screenshot path, and metadata path.\n",
+    "  - map lines describe normalized-to-image and normalized-to-native coordinate formulas.\n",
+    "\n",
+    "Agent notes:\n",
+    "  - Read the returned screenshot file before choosing an action.\n",
+    "  - Use `--grid-overlay false` when grid lines would obscure target UI or text.\n",
+    "  - If multiple screens are listed, include screen_id in pointer actions.\n",
+    "\n",
+    "Examples:\n",
+    "  ferrisgrid observe\n",
+    "  ferrisgrid observe --screen-id screen-1 --grid-overlay false\n",
+    "  ferrisgrid observe --resolution detail --format png\n",
+);
+
+const ACT_HELP: &str = concat!(
+    "FerrisGrid act\n",
+    "\n",
+    "Execute exactly one compact Markdown action, then capture and print the updated screen state.\n",
+    "\n",
+    "Docs: ",
+    docs_url!(),
+    "commands/act.html\n",
+    "\n",
+    "Usage:\n",
+    "  ferrisgrid act --file action.md [options]\n",
+    "  ferrisgrid act [options] < action.md\n",
+    "\n",
+    "Options:\n",
+    "  --file <path>                  Read compact Markdown action from this file. Otherwise stdin.\n",
+    "  --dry-run                      Validate and parse without emitting OS input.\n",
+    "  --output-dir <path>            Trace root. Default: .ferrisgrid\n",
+    "  --session <name-or-path>       Use an existing session. Default: latest session.\n",
+    "  --screen-id <screen-id>        Default target for pointer actions that omit screen_id.\n",
+    "  --backend <name>               native, native-linux-x11, native-macos, fake.\n",
+    "  --format <jpg|png>             Post-action screenshot format. Default: jpg.\n",
+    "  --grid-overlay <true|false>    Stamp coordinate grid on post-action screenshots. Default: true.\n",
+    "  --resolution <preset|pixels>   fast, balanced, detail, native, or max edge pixels.\n",
+    "  --max-image-edge <pixels|native>\n",
+    "  --no-downsample                Keep native screenshot dimensions.\n",
+    "  -h, --help                     Show this help.\n",
+    "\n",
+    "Required action format:\n",
+    "  Use compact Markdown key/value lines. JSON is rejected.\n",
+    "  For active actions, status defaults to action when omitted.\n",
+    "  Terminal statuses do not execute input:\n",
+    "    status: done\n",
+    "    reason: task complete\n",
+    "  Terminal statuses return screens: 0 and no post-action screenshot.\n",
+    "\n",
+    "Common fields:\n",
+    "  status: action | done | fail\n",
+    "  action: click | double_click | right_click | move_mouse | drag | scroll | type | press_key | hotkey | wait\n",
+    "  screen_id: screen-1            Pointer actions only. Required on multi-screen systems unless --screen-id is set.\n",
+    "  wait_after_ms: 500             Optional for action status. Max 30000.\n",
+    "  confidence: 0.82               Optional agent-supplied confidence.\n",
+    "  reason: short note             Optional agent-supplied reason.\n",
+    "\n",
+    "Pointer examples:\n",
+    "  status: action\n",
+    "  action: click\n",
+    "  screen_id: screen-1\n",
+    "  x: 742\n",
+    "  y: 611\n",
+    "  button: left\n",
+    "  wait_after_ms: 700\n",
+    "\n",
+    "  action: drag\n",
+    "  screen_id: screen-1\n",
+    "  from_x: 450\n",
+    "  from_y: 500\n",
+    "  to_x: 620\n",
+    "  to_y: 500\n",
+    "  duration_ms: 450\n",
+    "\n",
+    "Scroll example:\n",
+    "  action: scroll\n",
+    "  screen_id: screen-1\n",
+    "  x: 500\n",
+    "  y: 500\n",
+    "  delta_y: -720\n",
+    "\n",
+    "  action: scroll\n",
+    "  delta_y: -720\n",
+    "\n",
+    "Non-screen examples:\n",
+    "  action: wait\n",
+    "  duration_ms: 1000\n",
+    "\n",
+    "Keyboard examples:\n",
+    "  action: type\n",
+    "  text: hello\n",
+    "\n",
+    "  action: press_key\n",
+    "  key: enter\n",
+    "\n",
+    "  action: hotkey\n",
+    "  keys: Cmd+Space\n",
+    "\n",
+    "Safety limits:\n",
+    "  - Coordinates must be 0..1000.\n",
+    "  - Scroll x and y must be supplied together or both omitted.\n",
+    "  - Scroll delta_x and delta_y absolute values must be <= 2000.\n",
+    "  - Drag duration_ms must be <= 5000.\n",
+    "  - Type text is limited to 500 characters.\n",
+    "  - Hotkeys may contain 1 to 4 keys.\n",
+    "  - wait and wait_after_ms are limited to 30000 ms.\n",
+    "\n",
+    "Examples:\n",
+    "  ferrisgrid act --file .ferrisgrid/action.md\n",
+    "  ferrisgrid act --file .ferrisgrid/action.md --grid-overlay false\n",
+    "  ferrisgrid act --file .ferrisgrid/action.md --dry-run\n",
+);
+
+const DOCTOR_HELP: &str = concat!(
+    "FerrisGrid doctor\n",
+    "\n",
+    "Check capture, input, screen discovery, output directory, and ffmpeg availability.\n",
+    "\n",
+    "Docs: ",
+    docs_url!(),
+    "commands/doctor.html\n",
+    "\n",
+    "Usage:\n",
+    "  ferrisgrid doctor [options]\n",
+    "\n",
+    "Options:\n",
+    "  --output-dir <path>            Trace root to create/check. Default: .ferrisgrid\n",
+    "  --backend <name>               native, native-linux-x11, native-macos, fake.\n",
+    "  -h, --help                     Show this help.\n",
+    "\n",
+    "Agent notes:\n",
+    "  - On macOS, capture/input may require Screen Recording and Accessibility permissions.\n",
+    "  - On Linux/X11, DISPLAY must be set for native-linux-x11.\n",
+    "  - `screens: 0` or capture errors mean observe cannot proceed until the desktop backend works.\n",
+);
+
+const RECAP_HELP: &str = concat!(
+    "FerrisGrid recap\n",
+    "\n",
+    "Generate human-review artifacts from an existing local session directory.\n",
+    "\n",
+    "Docs: ",
+    docs_url!(),
+    "commands/recap.html\n",
+    "\n",
+    "Usage:\n",
+    "  ferrisgrid recap <session_path> [options]\n",
+    "\n",
+    "Options:\n",
+    "  --video mp4                    Also export an MP4 session video.\n",
+    "  --framerate <fps>              Video frames per second. Default: 2.\n",
+    "  --fps <fps>                    Alias for --framerate.\n",
+    "  -h, --help                     Show this help.\n",
+    "\n",
+    "Example:\n",
+    "  ferrisgrid recap .ferrisgrid/sessions/<session_id> --video mp4 --framerate 2\n",
+);
+
+const CLEAR_HELP: &str = concat!(
+    "FerrisGrid clear\n",
+    "\n",
+    "Remove a FerrisGrid output directory.\n",
+    "\n",
+    "Docs: ",
+    docs_url!(),
+    "commands/clear.html\n",
+    "\n",
+    "Usage:\n",
+    "  ferrisgrid clear [options]\n",
+    "\n",
+    "Options:\n",
+    "  --output-dir <path>            Directory to remove. Default: .ferrisgrid\n",
+    "  --force                        Required for custom output directories.\n",
+    "  -h, --help                     Show this help.\n",
+    "\n",
+    "Safety:\n",
+    "  - Refuses empty paths, current directory, and filesystem root.\n",
+    "  - Refuses custom output directories unless --force is present.\n",
+);
 
 #[cfg(test)]
 mod tests {
@@ -502,6 +915,90 @@ mod tests {
             "ferrisgrid-cli-test-{name}-{}-{nonce}-{counter}",
             process::id()
         ))
+    }
+
+    #[test]
+    fn root_help_is_agent_self_documenting() {
+        let help = help_text(HelpTopic::Root);
+
+        assert!(help.contains("Agent loop:"));
+        assert!(help.contains("Coordinate protocol:"));
+        assert!(help.contains("Action Markdown summary:"));
+        assert!(help.contains("https://brunov21.github.io/FerrisGrid-CLI/"));
+    }
+
+    #[test]
+    fn act_help_documents_action_schema_and_overlay_flag() {
+        let help = help_text(HelpTopic::Act);
+
+        assert!(help.contains("--grid-overlay <true|false>"));
+        assert!(help.contains("--screen-id <screen-id>"));
+        assert!(help.contains("JSON is rejected"));
+        assert!(help.contains("action: click | double_click"));
+        assert!(help.contains("wait_after_ms"));
+        assert!(help.contains("keys: Cmd+Space"));
+    }
+
+    #[test]
+    fn parses_help_topics() {
+        assert_eq!(parse_help_topic("observe").unwrap(), HelpTopic::Observe);
+        assert_eq!(parse_help_topic("act").unwrap(), HelpTopic::Act);
+        assert_eq!(parse_help_topic("--help").unwrap(), HelpTopic::Root);
+
+        let error = parse_help_topic("missing").unwrap_err();
+        assert_eq!(error.kind, ferrisgrid_core::ErrorKind::Protocol);
+        assert!(error.message.contains("unknown help topic"));
+    }
+
+    #[test]
+    fn recognizes_command_help_requests() {
+        assert!(is_help_request(&["--help".to_string()]));
+        assert!(is_help_request(&["-h".to_string()]));
+        assert!(is_help_request(&["help".to_string()]));
+        assert!(!is_help_request(&[
+            "--grid-overlay".to_string(),
+            "false".to_string()
+        ]));
+    }
+
+    #[test]
+    fn observe_rejects_act_only_options() {
+        let error = reject_act_only_options_for_observe(&parse_options(&["--dry-run"]))
+            .expect_err("observe should reject --dry-run");
+
+        assert_eq!(error.kind, ferrisgrid_core::ErrorKind::Protocol);
+        assert!(error.message.contains("--dry-run"));
+
+        let error = reject_act_only_options_for_observe(&parse_options(&["--file", "action.md"]))
+            .expect_err("observe should reject --file");
+
+        assert_eq!(error.kind, ferrisgrid_core::ErrorKind::Protocol);
+        assert!(error.message.contains("--file"));
+    }
+
+    #[test]
+    fn rejects_undocumented_legacy_grid_flags() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        clear_option_env();
+
+        let error = Options::parse(vec!["--grid-step".to_string(), "100".to_string()])
+            .expect_err("legacy grid flags should not be silently ignored");
+
+        assert_eq!(error.kind, ferrisgrid_core::ErrorKind::Protocol);
+        assert!(error.message.contains("unknown flag"));
+    }
+
+    #[test]
+    fn doctor_parser_rejects_irrelevant_shared_flags() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        clear_option_env();
+
+        let error =
+            DoctorCommandOptions::parse(&["--grid-overlay".to_string(), "false".to_string()])
+                .expect_err("doctor should reject observe/act-only flags");
+
+        assert_eq!(error.kind, ferrisgrid_core::ErrorKind::Protocol);
+        assert!(error.message.contains("unknown doctor flag"));
     }
 
     fn observe_fake_dimensions(image_size_limit: ImageSizeLimit) -> Vec<(u32, u32)> {
