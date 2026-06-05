@@ -18,13 +18,19 @@ const DETAIL_IMAGE_EDGE: u32 = 1920;
 
 macro_rules! docs_url {
     () => {
-        "https://brunov21.github.io/FerrisGrid-CLI/"
+        "https://github.com/BrunoV21/FerrisGrid-CLI/tree/main/docs/official"
+    };
+}
+
+macro_rules! command_docs_url {
+    () => {
+        "https://github.com/BrunoV21/FerrisGrid-CLI/blob/main/docs/official/commands"
     };
 }
 
 macro_rules! agent_docs_url {
     () => {
-        "https://raw.githubusercontent.com/BrunoV21/FerrisGrid-CLI/main/docs/official/agents.md"
+        "https://github.com/BrunoV21/FerrisGrid-CLI/blob/main/docs/official/agents.md"
     };
 }
 
@@ -605,8 +611,8 @@ const ROOT_HELP: &str = concat!(
     docs_url!(),
     "\n",
     "  Commands: ",
-    docs_url!(),
-    "commands/\n",
+    command_docs_url!(),
+    "\n",
     "Docs for agents:\n",
     "  ",
     agent_docs_url!(),
@@ -681,8 +687,8 @@ const OBSERVE_HELP: &str = concat!(
     "screen metadata, and normalized coordinate mapping.\n",
     "\n",
     "Docs: ",
-    docs_url!(),
-    "commands/observe.html\n",
+    command_docs_url!(),
+    "/observe.md\n",
     "\n",
     "Usage:\n",
     "  ferrisgrid observe [options]\n",
@@ -723,8 +729,8 @@ const ACT_HELP: &str = concat!(
     "Execute exactly one compact Markdown action, then capture and print the updated screen state.\n",
     "\n",
     "Docs: ",
-    docs_url!(),
-    "commands/act.html\n",
+    command_docs_url!(),
+    "/act.md\n",
     "\n",
     "Usage:\n",
     "  ferrisgrid act --file action.md [options]\n",
@@ -822,8 +828,8 @@ const DOCTOR_HELP: &str = concat!(
     "Check capture, input, screen discovery, output directory, and ffmpeg availability.\n",
     "\n",
     "Docs: ",
-    docs_url!(),
-    "commands/doctor.html\n",
+    command_docs_url!(),
+    "/doctor.md\n",
     "\n",
     "Usage:\n",
     "  ferrisgrid doctor [options]\n",
@@ -845,8 +851,8 @@ const RECAP_HELP: &str = concat!(
     "Generate human-review artifacts from an existing local session directory.\n",
     "\n",
     "Docs: ",
-    docs_url!(),
-    "commands/recap.html\n",
+    command_docs_url!(),
+    "/recap.md\n",
     "\n",
     "Usage:\n",
     "  ferrisgrid recap <session_path> [options]\n",
@@ -867,8 +873,8 @@ const CLEAR_HELP: &str = concat!(
     "Remove a FerrisGrid output directory.\n",
     "\n",
     "Docs: ",
-    docs_url!(),
-    "commands/clear.html\n",
+    command_docs_url!(),
+    "/clear.md\n",
     "\n",
     "Usage:\n",
     "  ferrisgrid clear [options]\n",
@@ -936,9 +942,11 @@ mod tests {
         assert!(help.contains("Action Markdown summary:"));
         assert!(help.contains("Docs for humans:"));
         assert!(help.contains("Docs for agents:"));
-        assert!(help.contains("https://brunov21.github.io/FerrisGrid-CLI/"));
+        assert!(
+            help.contains("https://github.com/BrunoV21/FerrisGrid-CLI/tree/main/docs/official")
+        );
         assert!(help.contains(
-            "https://raw.githubusercontent.com/BrunoV21/FerrisGrid-CLI/main/docs/official/agents.md"
+            "https://github.com/BrunoV21/FerrisGrid-CLI/blob/main/docs/official/agents.md"
         ));
     }
 
