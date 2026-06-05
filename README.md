@@ -5,6 +5,7 @@
 
   <p>
     <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-8A2BE2?style=for-the-badge">
+    <a href="https://brunov21.github.io/FerrisGrid-CLI/"><img alt="Official documentation" src="https://img.shields.io/badge/docs-official-8A2BE2?style=for-the-badge"></a>
     <img alt="Rust 2024" src="https://img.shields.io/badge/rust-2024-00E5FF?style=for-the-badge&logo=rust&logoColor=white">
     <img alt="Cargo workspace" src="https://img.shields.io/badge/cargo-workspace-A970FF?style=for-the-badge&logo=rust&logoColor=white">
     <img alt="Platforms: macOS, Linux, Windows" src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-111111?style=for-the-badge">
