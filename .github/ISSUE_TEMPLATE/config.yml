@@ -1,5 +1,8 @@
 blank_issues_enabled: true
 contact_links:
   - name: FerrisGrid documentation
-    url: https://brunov21.github.io/FerrisGrid-CLI/
+    url: https://github.com/BrunoV21/FerrisGrid-CLI/tree/main/docs/official
     about: Read the official docs before opening setup and usage questions.
+  - name: TypeScript npm package mirror
+    url: https://github.com/BrunoV21/FerrisGrid-CLI-ts
+    about: Use the TypeScript mirror repository for npm package-specific bugs.

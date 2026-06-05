@@ -9,6 +9,15 @@ ferrisgrid doctor
 
 The crates.io package is `ferrisgrid-cli`; the installed command is `ferrisgrid`.
 
+## TypeScript npm mirror
+
+An equivalent TypeScript package is maintained at [`BrunoV21/FerrisGrid-CLI-ts`](https://github.com/BrunoV21/FerrisGrid-CLI-ts). It mirrors the Rust CLI behavior for Node.js distribution; new features and protocol changes should still be requested in [`BrunoV21/FerrisGrid-CLI`](https://github.com/BrunoV21/FerrisGrid-CLI).
+
+```bash
+npm install -g ferrisgrid-cli
+ferrisgrid doctor
+```
+
 ## Development from source
 
 Use a local checkout when you want to build, test, or modify FerrisGrid:

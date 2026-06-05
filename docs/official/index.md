@@ -21,6 +21,9 @@ hero:
     - theme: alt
       text: "GitHub"
       link: https://github.com/BrunoV21/FerrisGrid-CLI
+    - theme: alt
+      text: "TypeScript npm mirror"
+      link: https://github.com/BrunoV21/FerrisGrid-CLI-ts
 
 features:
   - title: "Single-step execution"
@@ -64,6 +67,15 @@ FerrisGrid gives the machine eyes, gives the model a map, and lets Rust move fas
 cargo install ferrisgrid-cli
 ferrisgrid doctor
 ```
+
+An equivalent TypeScript npm package is available from [`BrunoV21/FerrisGrid-CLI-ts`](https://github.com/BrunoV21/FerrisGrid-CLI-ts):
+
+```bash
+npm install -g ferrisgrid-cli
+ferrisgrid doctor
+```
+
+Feature requests and protocol changes belong in [`BrunoV21/FerrisGrid-CLI`](https://github.com/BrunoV21/FerrisGrid-CLI).
 
 ## First observe/action loop
 
