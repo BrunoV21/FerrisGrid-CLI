@@ -10,6 +10,29 @@ This page is a raw Markdown index for agents. Prefer these links when you need d
 - [Agent protocol](https://raw.githubusercontent.com/BrunoV21/FerrisGrid-CLI/main/docs/official/concepts/agent-protocol.md)
 - [Commands overview](https://raw.githubusercontent.com/BrunoV21/FerrisGrid-CLI/main/docs/official/commands/index.md)
 
+## Install
+
+Rust package:
+
+```bash
+cargo install ferrisgrid-cli
+ferrisgrid doctor
+```
+
+- Package: [`ferrisgrid-cli` on crates.io](https://crates.io/crates/ferrisgrid-cli)
+- Installed command: `ferrisgrid`
+
+TypeScript npm package:
+
+```bash
+npm install -g ferrisgrid-cli
+ferrisgrid doctor
+```
+
+- Package: [`ferrisgrid-cli` on npm](https://www.npmjs.com/package/ferrisgrid-cli)
+- Source mirror: [`BrunoV21/FerrisGrid-CLI-ts`](https://github.com/BrunoV21/FerrisGrid-CLI-ts)
+- Installed command: `ferrisgrid`
+
 ## Command Reference
 
 - [observe](https://raw.githubusercontent.com/BrunoV21/FerrisGrid-CLI/main/docs/official/commands/observe.md)

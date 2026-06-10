@@ -47,7 +47,7 @@ ferrisgrid doctor
 
 The package is [`ferrisgrid-cli`](https://crates.io/crates/ferrisgrid-cli) on crates.io and installs the `ferrisgrid` command.
 
-An equivalent TypeScript npm package is maintained in [`BrunoV21/FerrisGrid-CLI-ts`](https://github.com/BrunoV21/FerrisGrid-CLI-ts). It mirrors this Rust CLI behavior for Node.js distribution, while feature requests and protocol changes stay anchored in this Rust repository.
+FerrisGrid is also available via npm as [`ferrisgrid-cli`](https://www.npmjs.com/package/ferrisgrid-cli). The TypeScript npm package is maintained in [`BrunoV21/FerrisGrid-CLI-ts`](https://github.com/BrunoV21/FerrisGrid-CLI-ts) and mirrors this Rust CLI behavior for Node.js distribution, while feature requests and protocol changes stay anchored in this Rust repository.
 
 ```bash
 npm install -g ferrisgrid-cli
@@ -164,6 +164,7 @@ docker exec ferrisgrid-workspace ferrisgrid observe
 ## Documentation
 
 Official docs live in [`docs/official`](docs/official).
+Agents should use the raw Markdown index: [`docs/official/agents.md`](https://raw.githubusercontent.com/BrunoV21/FerrisGrid-CLI/main/docs/official/agents.md).
 Brand positioning and story notes live in [`docs/branding`](docs/branding).
 The TypeScript npm mirror lives in [`BrunoV21/FerrisGrid-CLI-ts`](https://github.com/BrunoV21/FerrisGrid-CLI-ts).
 
