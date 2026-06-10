@@ -49,3 +49,5 @@ cargo install ferrisgrid-cli --version X.Y.Z
 Only content between `<!-- release-notes:start -->` and `<!-- release-notes:end -->` is published as the GitHub release body.
 
 Do not manually edit `docs/official/releases/index.md` for each release. It dynamically reads every `v*.md` file in `docs/official/releases/` and renders a scrollable release page.
+
+After drafting the release notes and before tagging or pushing, check the TypeScript wrapper in `../FerrisGrid-CLI-ts` and update it as needed so it covers the same specification and behavior as the Rust package release.
