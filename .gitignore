@@ -2,6 +2,8 @@
 /target/
 .ferrisgrid/
 docs/official/node_modules/
+docs/tests/fixtures/browser/node_modules/
+docs/tests/results/host-v1/
 docs/official/.vitepress/cache/
 docs/official/.vitepress/dist/
 .DS_Store
