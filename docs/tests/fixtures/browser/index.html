@@ -1,0 +1,444 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FerrisGrid Benchmark Fixture</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f8fb;
+      --panel: #ffffff;
+      --ink: #1f2937;
+      --muted: #5b6472;
+      --line: #cfd6e2;
+      --accent: #0f766e;
+      --accent-dark: #115e59;
+      --warn: #92400e;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-size: 16px;
+      line-height: 1.5;
+    }
+
+    main {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 28px 20px 56px;
+    }
+
+    h1 {
+      margin: 0 0 6px;
+      font-size: 28px;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin: 0 0 18px;
+      font-size: 21px;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 0 0 16px;
+      color: var(--muted);
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 22px;
+      box-shadow: 0 1px 2px rgba(31, 41, 55, 0.05);
+    }
+
+    .scenario-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 10px;
+      margin-top: 20px;
+    }
+
+    a, button {
+      font: inherit;
+    }
+
+    a {
+      color: var(--accent-dark);
+      font-weight: 650;
+    }
+
+    button {
+      border: 1px solid var(--accent-dark);
+      border-radius: 6px;
+      background: var(--accent);
+      color: #ffffff;
+      min-height: 42px;
+      padding: 8px 14px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    button.secondary {
+      background: #ffffff;
+      color: var(--accent-dark);
+    }
+
+    button:focus,
+    input:focus,
+    textarea:focus {
+      outline: 3px solid rgba(15, 118, 110, 0.25);
+      outline-offset: 2px;
+    }
+
+    label {
+      display: block;
+      margin: 12px 0 5px;
+      font-weight: 700;
+    }
+
+    input,
+    textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      min-height: 40px;
+      padding: 8px 10px;
+      font: inherit;
+      color: var(--ink);
+      background: #ffffff;
+    }
+
+    textarea {
+      min-height: 96px;
+      resize: vertical;
+    }
+
+    .status {
+      margin: 18px 0;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #eef6f5;
+      font-weight: 800;
+    }
+
+    .error {
+      background: #fff7ed;
+      color: var(--warn);
+    }
+
+    .choices {
+      display: grid;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    .choice {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 12px;
+    }
+
+    .choice label {
+      margin: 0;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .choice input {
+      width: auto;
+      min-height: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 16px;
+    }
+
+    th,
+    td {
+      text-align: left;
+      border-bottom: 1px solid var(--line);
+      padding: 10px;
+    }
+
+    th {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .scroll-spacer {
+      min-height: 1100px;
+      display: grid;
+      align-content: end;
+      gap: 14px;
+    }
+
+    .archive-card {
+      background: #ffffff;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+    }
+
+    .target-pad {
+      min-height: 460px;
+      display: grid;
+      place-items: center;
+    }
+
+    .target-button {
+      width: 220px;
+      height: 74px;
+      font-size: 18px;
+    }
+
+    .small-note {
+      color: var(--muted);
+      font-size: 14px;
+      margin-top: 14px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>FerrisGrid Benchmark Fixture</h1>
+    <p id="scenario-name">Local deterministic browser target</p>
+    <section id="app" class="panel"></section>
+  </main>
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const scenario = params.get("scenario") || "index";
+    const app = document.querySelector("#app");
+    const scenarioName = document.querySelector("#scenario-name");
+    const inventoryRows = [
+      ["Aster Dock", "Navigation", "Ready"],
+      ["Cobalt Ridge", "Materials", "Ready"],
+      ["Delta Grove", "Research", "Paused"],
+      ["Ember Vault", "Storage", "Ready"]
+    ];
+
+    function setEvidence(value) {
+      const node = document.querySelector("#evidence");
+      if (node) node.textContent = value;
+      window.__benchmarkEvidence = value;
+    }
+
+    function renderIndex() {
+      scenarioName.textContent = "Scenario index";
+      app.innerHTML = `
+        <h2>Scenarios</h2>
+        <p>Use a scenario query parameter to open a benchmark target.</p>
+        <div class="scenario-list">
+          ${[
+            "browser-button-state",
+            "browser-form-validation",
+            "browser-multi-step-wizard",
+            "browser-table-filter",
+            "browser-scroll-target",
+            "desktop-coordinate-stability"
+          ].map((id) => `<a href="?scenario=${id}&reset=1">${id}</a>`).join("")}
+        </div>
+      `;
+    }
+
+    function renderButtonState() {
+      scenarioName.textContent = "browser-button-state";
+      app.innerHTML = `
+        <h2>Button State</h2>
+        <p>Activate the reactor and verify the changed status text.</p>
+        <button id="activate-reactor">Activate Reactor</button>
+        <div id="evidence" class="status">Status: waiting</div>
+      `;
+      document.querySelector("#activate-reactor").addEventListener("click", () => {
+        setEvidence("Status: Flux stabilized");
+      });
+    }
+
+    function renderFormValidation() {
+      scenarioName.textContent = "browser-form-validation";
+      app.innerHTML = `
+        <h2>Contact Form</h2>
+        <form id="contact-form" novalidate>
+          <label for="name">Name</label>
+          <input id="name" name="name" autocomplete="off" required>
+          <label for="email">Email</label>
+          <input id="email" name="email" autocomplete="off" required>
+          <label for="message">Message</label>
+          <textarea id="message" name="message" required></textarea>
+          <div class="small-note">All fields must match the task prompt exactly.</div>
+          <p><button id="submit-form" type="submit">Submit</button></p>
+        </form>
+        <div id="evidence" class="status">Status: form waiting</div>
+      `;
+      document.querySelector("#contact-form").addEventListener("submit", (event) => {
+        event.preventDefault();
+        const values = {
+          name: document.querySelector("#name").value,
+          email: document.querySelector("#email").value,
+          message: document.querySelector("#message").value
+        };
+        if (
+          values.name === "Ada Lovelace" &&
+          values.email === "ada@example.test" &&
+          values.message === "Benchmark message accepted."
+        ) {
+          setEvidence("Submission received for Ada Lovelace");
+        } else {
+          setEvidence("Validation failed");
+          document.querySelector("#evidence").classList.add("error");
+        }
+      });
+    }
+
+    function renderWizard() {
+      scenarioName.textContent = "browser-multi-step-wizard";
+      app.innerHTML = `
+        <h2>Route Wizard</h2>
+        <div id="wizard-step"></div>
+        <div id="evidence" class="status">Wizard waiting</div>
+      `;
+      const state = { route: "", operator: "", code: "" };
+      const step = document.querySelector("#wizard-step");
+      function stepOne() {
+        step.innerHTML = `
+          <p>Step 1 of 3</p>
+          <div class="choices">
+            <div class="choice"><label><input type="radio" name="route" value="Fast Route"> Fast Route</label></div>
+            <div class="choice"><label><input type="radio" name="route" value="Stable Route"> Stable Route</label></div>
+            <div class="choice"><label><input type="radio" name="route" value="Stable Report"> Stable Report</label></div>
+          </div>
+          <button id="wizard-next">Next</button>
+        `;
+        document.querySelector("#wizard-next").addEventListener("click", () => {
+          const selected = document.querySelector("input[name='route']:checked");
+          state.route = selected ? selected.value : "";
+          if (state.route === "Stable Route") stepTwo();
+          else setEvidence("Wizard selection incorrect");
+        });
+      }
+      function stepTwo() {
+        step.innerHTML = `
+          <p>Step 2 of 3</p>
+          <label for="operator">Operator</label>
+          <input id="operator" autocomplete="off">
+          <label for="route-code">Code</label>
+          <input id="route-code" autocomplete="off">
+          <p><button id="wizard-next">Next</button></p>
+        `;
+        document.querySelector("#wizard-next").addEventListener("click", () => {
+          state.operator = document.querySelector("#operator").value;
+          state.code = document.querySelector("#route-code").value;
+          if (state.operator === "Mina Patel" && state.code === "Q4-17") stepThree();
+          else setEvidence("Wizard values incorrect");
+        });
+      }
+      function stepThree() {
+        step.innerHTML = `
+          <p>Step 3 of 3</p>
+          <p id="summary-preview">${state.route} | ${state.operator} | ${state.code}</p>
+          <button id="wizard-confirm">Confirm</button>
+        `;
+        document.querySelector("#wizard-confirm").addEventListener("click", () => {
+          setEvidence(`${state.route} | ${state.operator} | ${state.code}`);
+        });
+      }
+      stepOne();
+    }
+
+    function renderTableFilter() {
+      scenarioName.textContent = "browser-table-filter";
+      app.innerHTML = `
+        <h2>Inventory Filter</h2>
+        <label for="inventory-filter">Filter inventory</label>
+        <input id="inventory-filter" autocomplete="off">
+        <table aria-label="Inventory table">
+          <thead><tr><th>Name</th><th>Category</th><th>Status</th></tr></thead>
+          <tbody id="inventory-body"></tbody>
+        </table>
+        <div id="evidence" class="status">Visible rows: 4</div>
+      `;
+      const body = document.querySelector("#inventory-body");
+      function drawRows(term = "") {
+        const normalized = term.trim().toLowerCase();
+        let visible = 0;
+        body.innerHTML = inventoryRows.map((row) => {
+          const match = !normalized || row.join(" ").toLowerCase().includes(normalized);
+          if (match) visible += 1;
+          return `<tr ${match ? "" : "hidden"}><td>${row[0]}</td><td>${row[1]}</td><td>${row[2]}</td></tr>`;
+        }).join("");
+        const visibleNames = inventoryRows.filter((row) => !normalized || row.join(" ").toLowerCase().includes(normalized)).map((row) => row[0]);
+        setEvidence(visible === 1 ? `Only visible row: ${visibleNames[0]}` : `Visible rows: ${visible}`);
+      }
+      document.querySelector("#inventory-filter").addEventListener("input", (event) => drawRows(event.target.value));
+      drawRows();
+    }
+
+    function renderScrollTarget() {
+      scenarioName.textContent = "browser-scroll-target";
+      app.innerHTML = `
+        <h2>Archive List</h2>
+        <p>Archive Node 42 is below the fold.</p>
+        <div id="evidence" class="status">No archive selected</div>
+        <div class="scroll-spacer">
+          ${Array.from({ length: 8 }, (_, index) => `
+            <div class="archive-card">
+              <strong>Archive Node ${index + 11}</strong>
+              <p>Routine archive entry.</p>
+            </div>
+          `).join("")}
+          <div class="archive-card" id="archive-node-42">
+            <strong>Archive Node 42</strong>
+            <p>Target archive entry.</p>
+            <button id="select-archive-42">Select Archive Node 42</button>
+          </div>
+        </div>
+      `;
+      document.querySelector("#select-archive-42").addEventListener("click", () => {
+        setEvidence("Selected Archive Node 42");
+      });
+    }
+
+    function renderCoordinateStability() {
+      scenarioName.textContent = "desktop-coordinate-stability";
+      app.innerHTML = `
+        <h2>Coordinate Stability</h2>
+        <p>Click the fixed visual target five times.</p>
+        <div class="target-pad">
+          <button id="stable-target" class="target-button">Click Target</button>
+        </div>
+        <div id="evidence" class="status">Successful clicks: 0</div>
+      `;
+      let count = 0;
+      document.querySelector("#stable-target").addEventListener("click", () => {
+        count += 1;
+        setEvidence(`Successful clicks: ${count}`);
+      });
+    }
+
+    const renderers = {
+      "browser-button-state": renderButtonState,
+      "browser-form-validation": renderFormValidation,
+      "browser-multi-step-wizard": renderWizard,
+      "browser-table-filter": renderTableFilter,
+      "browser-scroll-target": renderScrollTarget,
+      "desktop-coordinate-stability": renderCoordinateStability
+    };
+
+    if (renderers[scenario]) renderers[scenario]();
+    else renderIndex();
+  </script>
+</body>
+</html>

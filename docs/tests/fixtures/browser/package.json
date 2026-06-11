@@ -1,0 +1,11 @@
+{
+  "name": "ferrisgrid-browser-benchmark-fixture",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "smoke": "node playwright-smoke.mjs http://127.0.0.1:4173/"
+  },
+  "devDependencies": {
+    "playwright": "1.60.0"
+  }
+}

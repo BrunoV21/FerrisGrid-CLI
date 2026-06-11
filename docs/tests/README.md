@@ -2,7 +2,7 @@
 
 This directory defines the benchmark foundation for comparing FerrisGrid with other computer automation tools when Codex is the executor agent.
 
-The benchmark measures how well Codex can complete the same tasks using each tool's CLI or installed skill instructions. Version 1 is documentation-only: it defines competitors, scenarios, metrics, and run protocol before any fixture apps or harness code are added.
+The benchmark measures how well Codex can complete the same tasks using each tool's CLI or installed skill instructions. Version 1 starts with host-only local fixtures so the same task prompts can be executed by FerrisGrid and browser automation competitors without depending on external websites.
 
 ## V1 Scope
 
@@ -42,16 +42,19 @@ Excluded:
 - `metrics.md`: metric definitions, formulas, and recording guidance.
 - `scenarios.md`: initial browser and desktop test cases.
 - `runbook.md`: setup, execution, fairness, and repeat protocol.
+- `host-runbook.md`: host-only execution protocol for local benchmark runs.
+- `test-cases.md`: exact task prompts, setup, and success criteria used by the executor.
 - `results-template.md`: per-run Markdown capture template.
+- `fixtures/`: deterministic local fixtures and smoke runners.
 
 ## Default Environment
 
-Use the Linux Docker workspace described in `../docker-workspace.md` for the first benchmark implementation.
+Use the host machine for the current benchmark implementation. Do not use Docker for host benchmark runs.
 
-Default display:
+Default host display target:
 
 ```text
-XVFB_SCREEN=1280x800x24
+1280x800 or the closest available visible browser/desktop window size
 ```
 
 Default fixture policy:
@@ -60,4 +63,3 @@ Default fixture policy:
 - Avoid network-dependent pages.
 - Avoid authenticated workflows.
 - Avoid destructive actions.
-
