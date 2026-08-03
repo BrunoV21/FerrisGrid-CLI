@@ -15,7 +15,8 @@ function Wait-For([scriptblock]$Condition, [int]$TimeoutSeconds = 15) {
         try { if (& $Condition) { return } } catch { }
         Start-Sleep -Milliseconds 100
     }
-    throw "native Windows E2E condition timed out"
+    $fixtureState = if (Test-Path $statePath) { Get-Content -Raw $statePath } else { "unavailable" }
+    throw "native Windows E2E condition timed out; fixture state: $fixtureState"
 }
 
 function Get-State { Get-Content -Raw $statePath | ConvertFrom-Json }
