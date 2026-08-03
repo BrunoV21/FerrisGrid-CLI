@@ -23,3 +23,5 @@ It prints:
 - ffmpeg availability
 
 Run this before an agent workflow, especially after changing permissions, backends, displays, or Docker workspace settings.
+
+On Windows, `doctor --backend native-windows` verifies display discovery and reports mouse/keyboard capability. Run it from an unlocked interactive desktop. Input to an elevated application or the secure desktop can still be rejected at execution time by Windows integrity isolation.

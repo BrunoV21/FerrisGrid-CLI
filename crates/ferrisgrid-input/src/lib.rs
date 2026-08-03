@@ -1,9 +1,13 @@
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+use ferrisgrid_core::MouseButton;
 use ferrisgrid_core::{
-    ErrorKind, FerrisError, InputBackend, InputCapabilities, InputExecution, MouseButton,
-    NativeAction, Result,
+    ErrorKind, FerrisError, InputBackend, InputCapabilities, InputExecution, NativeAction, Result,
 };
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::process::Command;
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 use std::thread;
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 use std::time::Duration;
 
 pub struct FakeInputBackend;
@@ -87,12 +91,43 @@ impl InputBackend for LinuxInputBackend {
     }
 }
 
+pub struct WindowsInputBackend;
+
+impl InputBackend for WindowsInputBackend {
+    fn name(&self) -> &'static str {
+        "native-windows"
+    }
+
+    fn capabilities(&self) -> InputCapabilities {
+        InputCapabilities {
+            can_mouse: cfg!(target_os = "windows"),
+            can_keyboard: cfg!(target_os = "windows"),
+        }
+    }
+
+    fn execute(&self, action: &NativeAction) -> Result<InputExecution> {
+        #[cfg(target_os = "windows")]
+        {
+            execute_windows(action)
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = action;
+            Err(FerrisError::new(
+                ErrorKind::Platform,
+                "native Windows input is only available on Windows; use --backend native on this OS or --backend fake",
+            ))
+        }
+    }
+}
+
 pub fn backend_by_name(name: &str) -> Box<dyn InputBackend> {
     match name {
         "fake" => Box::new(FakeInputBackend),
         "native" => native_backend(),
         "macos" | "native-macos" => Box::new(MacOsInputBackend),
         "linux" | "x11" | "native-linux" | "native-linux-x11" => Box::new(LinuxInputBackend),
+        "windows" | "win32" | "native-windows" => Box::new(WindowsInputBackend),
         _ => native_backend(),
     }
 }
@@ -106,10 +141,314 @@ fn native_backend() -> Box<dyn InputBackend> {
     {
         Box::new(MacOsInputBackend)
     }
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    #[cfg(target_os = "windows")]
+    {
+        Box::new(WindowsInputBackend)
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
     {
         Box::new(MacOsInputBackend)
     }
+}
+
+#[cfg(target_os = "windows")]
+fn execute_windows(action: &NativeAction) -> Result<InputExecution> {
+    match action {
+        NativeAction::Click { x, y, button } => {
+            windows_click(*x, *y, *button, 1)?;
+            Ok(InputExecution {
+                summary: format!("click x={x} y={y} button={}", button.as_str()),
+            })
+        }
+        NativeAction::DoubleClick { x, y, button } => {
+            windows_click(*x, *y, *button, 2)?;
+            Ok(InputExecution {
+                summary: format!("double_click x={x} y={y} button={}", button.as_str()),
+            })
+        }
+        NativeAction::RightClick { x, y } => {
+            windows_click(*x, *y, MouseButton::Right, 1)?;
+            Ok(InputExecution {
+                summary: format!("right_click x={x} y={y}"),
+            })
+        }
+        NativeAction::MoveMouse { x, y } => {
+            windows_move(*x, *y)?;
+            Ok(InputExecution {
+                summary: format!("move_mouse x={x} y={y}"),
+            })
+        }
+        NativeAction::Wait { duration_ms } => {
+            thread::sleep(Duration::from_millis(*duration_ms));
+            Ok(InputExecution {
+                summary: format!("wait duration_ms={duration_ms}"),
+            })
+        }
+        NativeAction::Type { text } => {
+            windows_type(text)?;
+            Ok(InputExecution {
+                summary: "type text=<redacted>".to_string(),
+            })
+        }
+        NativeAction::PressKey { key } => {
+            windows_press_key(key)?;
+            Ok(InputExecution {
+                summary: format!("press_key key={key}"),
+            })
+        }
+        NativeAction::Hotkey { keys } => {
+            windows_hotkey(keys)?;
+            Ok(InputExecution {
+                summary: format!("hotkey keys={}", keys.join("+")),
+            })
+        }
+        NativeAction::Drag {
+            from_x,
+            from_y,
+            to_x,
+            to_y,
+            duration_ms,
+            button,
+        } => {
+            windows_drag(*from_x, *from_y, *to_x, *to_y, *duration_ms, *button)?;
+            Ok(InputExecution {
+                summary: format!(
+                    "drag from_x={from_x} from_y={from_y} to_x={to_x} to_y={to_y} duration_ms={duration_ms} button={}",
+                    button.as_str()
+                ),
+            })
+        }
+        NativeAction::Scroll {
+            x,
+            y,
+            delta_x,
+            delta_y,
+        } => {
+            if let (Some(x), Some(y)) = (x, y) {
+                windows_move(*x, *y)?;
+            }
+            if *delta_y != 0 {
+                send_windows_mouse(MOUSEEVENTF_WHEEL, *delta_y as u32)?;
+            }
+            if *delta_x != 0 {
+                send_windows_mouse(MOUSEEVENTF_HWHEEL, *delta_x as u32)?;
+            }
+            Ok(InputExecution {
+                summary: format!("scroll delta_x={delta_x} delta_y={delta_y}"),
+            })
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn windows_move(x: i32, y: i32) -> Result<()> {
+    if unsafe { SetCursorPos(x, y) } == 0 {
+        return Err(windows_input_error("SetCursorPos failed"));
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn windows_click(x: i32, y: i32, button: MouseButton, count: u8) -> Result<()> {
+    windows_move(x, y)?;
+    let (down, up) = windows_button_flags(button);
+    for _ in 0..count {
+        send_windows_mouse(down, 0)?;
+        send_windows_mouse(up, 0)?;
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn windows_drag(
+    from_x: i32,
+    from_y: i32,
+    to_x: i32,
+    to_y: i32,
+    duration_ms: u64,
+    button: MouseButton,
+) -> Result<()> {
+    windows_move(from_x, from_y)?;
+    let (down, up) = windows_button_flags(button);
+    send_windows_mouse(down, 0)?;
+    let steps = 10_u64;
+    let sleep_ms = duration_ms.checked_div(steps).unwrap_or(0);
+    for step in 1..=steps {
+        let ratio = step as f64 / steps as f64;
+        let x = from_x + ((to_x - from_x) as f64 * ratio).round() as i32;
+        let y = from_y + ((to_y - from_y) as f64 * ratio).round() as i32;
+        windows_move(x, y)?;
+        if sleep_ms > 0 {
+            thread::sleep(Duration::from_millis(sleep_ms));
+        }
+    }
+    send_windows_mouse(up, 0)?;
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn windows_button_flags(button: MouseButton) -> (u32, u32) {
+    match button {
+        MouseButton::Left => (MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP),
+        MouseButton::Right => (MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP),
+        MouseButton::Middle => (MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP),
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn send_windows_mouse(flags: u32, data: u32) -> Result<()> {
+    let input = WinInput {
+        input_type: INPUT_MOUSE,
+        value: WinInputValue {
+            mouse: MouseInput {
+                dx: 0,
+                dy: 0,
+                mouse_data: data,
+                flags,
+                time: 0,
+                extra_info: 0,
+            },
+        },
+    };
+    send_windows_inputs(&[input])
+}
+
+#[cfg(target_os = "windows")]
+fn windows_type(text: &str) -> Result<()> {
+    let mut inputs = Vec::with_capacity(text.len() * 2);
+    for code_unit in text.encode_utf16() {
+        inputs.push(windows_keyboard_input(0, code_unit, KEYEVENTF_UNICODE));
+        inputs.push(windows_keyboard_input(
+            0,
+            code_unit,
+            KEYEVENTF_UNICODE | KEYEVENTF_KEYUP,
+        ));
+    }
+    send_windows_inputs(&inputs)
+}
+
+#[cfg(target_os = "windows")]
+fn windows_press_key(key: &str) -> Result<()> {
+    let virtual_key = windows_virtual_key(key)?;
+    send_windows_inputs(&[
+        windows_keyboard_input(virtual_key, 0, 0),
+        windows_keyboard_input(virtual_key, 0, KEYEVENTF_KEYUP),
+    ])
+}
+
+#[cfg(target_os = "windows")]
+fn windows_hotkey(keys: &[String]) -> Result<()> {
+    if keys.is_empty() {
+        return Err(FerrisError::new(
+            ErrorKind::Protocol,
+            "hotkey keys are required",
+        ));
+    }
+    let mapped = keys
+        .iter()
+        .map(|key| windows_virtual_key(key))
+        .collect::<Result<Vec<_>>>()?;
+    let mut inputs = Vec::with_capacity(mapped.len() * 2);
+    for key in &mapped {
+        inputs.push(windows_keyboard_input(*key, 0, 0));
+    }
+    for key in mapped.iter().rev() {
+        inputs.push(windows_keyboard_input(*key, 0, KEYEVENTF_KEYUP));
+    }
+    send_windows_inputs(&inputs)
+}
+
+#[cfg(target_os = "windows")]
+fn windows_virtual_key(key: &str) -> Result<u16> {
+    if let Some(key) = named_windows_virtual_key(key) {
+        return Ok(key);
+    }
+    let mut chars = key.chars();
+    let Some(value) = chars.next() else {
+        return Err(unsupported_windows_key(key));
+    };
+    if chars.next().is_some() || value.len_utf16() != 1 {
+        return Err(unsupported_windows_key(key));
+    }
+    let mapped = unsafe { VkKeyScanW(value as u16) };
+    if mapped == -1 {
+        Err(unsupported_windows_key(key))
+    } else {
+        Ok((mapped as u16) & 0xff)
+    }
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn named_windows_virtual_key(key: &str) -> Option<u16> {
+    match key.to_ascii_lowercase().as_str() {
+        "cmd" | "command" | "meta" | "super" | "win" | "windows" => Some(0x5b),
+        "ctrl" | "control" => Some(0x11),
+        "alt" | "option" => Some(0x12),
+        "shift" => Some(0x10),
+        "enter" | "return" => Some(0x0d),
+        "tab" => Some(0x09),
+        "escape" | "esc" => Some(0x1b),
+        "space" => Some(0x20),
+        "delete" | "del" => Some(0x2e),
+        "backspace" => Some(0x08),
+        "up" | "arrowup" => Some(0x26),
+        "down" | "arrowdown" => Some(0x28),
+        "left" | "arrowleft" => Some(0x25),
+        "right" | "arrowright" => Some(0x27),
+        _ => None,
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn unsupported_windows_key(key: &str) -> FerrisError {
+    FerrisError::new(
+        ErrorKind::Protocol,
+        format!("unsupported key for native Windows backend: {key}"),
+    )
+}
+
+#[cfg(target_os = "windows")]
+fn windows_keyboard_input(virtual_key: u16, scan: u16, flags: u32) -> WinInput {
+    WinInput {
+        input_type: INPUT_KEYBOARD,
+        value: WinInputValue {
+            keyboard: KeyboardInput {
+                virtual_key,
+                scan,
+                flags,
+                time: 0,
+                extra_info: 0,
+            },
+        },
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn send_windows_inputs(inputs: &[WinInput]) -> Result<()> {
+    if inputs.is_empty() {
+        return Ok(());
+    }
+    let sent = unsafe {
+        SendInput(
+            inputs.len() as u32,
+            inputs.as_ptr(),
+            std::mem::size_of::<WinInput>() as i32,
+        )
+    };
+    if sent != inputs.len() as u32 {
+        return Err(windows_input_error(
+            "SendInput failed; Windows can block input to an elevated application or secure desktop",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn windows_input_error(context: &str) -> FerrisError {
+    FerrisError::new(
+        ErrorKind::Execution,
+        format!("{context}: {}", std::io::Error::last_os_error()),
+    )
 }
 
 #[cfg(target_os = "linux")]
@@ -573,4 +912,97 @@ fn key_code(key: &str) -> Result<u16> {
 #[cfg(target_os = "macos")]
 fn escape_applescript(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+#[cfg(target_os = "windows")]
+const INPUT_MOUSE: u32 = 0;
+#[cfg(target_os = "windows")]
+const INPUT_KEYBOARD: u32 = 1;
+#[cfg(target_os = "windows")]
+const MOUSEEVENTF_LEFTDOWN: u32 = 0x0002;
+#[cfg(target_os = "windows")]
+const MOUSEEVENTF_LEFTUP: u32 = 0x0004;
+#[cfg(target_os = "windows")]
+const MOUSEEVENTF_RIGHTDOWN: u32 = 0x0008;
+#[cfg(target_os = "windows")]
+const MOUSEEVENTF_RIGHTUP: u32 = 0x0010;
+#[cfg(target_os = "windows")]
+const MOUSEEVENTF_MIDDLEDOWN: u32 = 0x0020;
+#[cfg(target_os = "windows")]
+const MOUSEEVENTF_MIDDLEUP: u32 = 0x0040;
+#[cfg(target_os = "windows")]
+const MOUSEEVENTF_WHEEL: u32 = 0x0800;
+#[cfg(target_os = "windows")]
+const MOUSEEVENTF_HWHEEL: u32 = 0x1000;
+#[cfg(target_os = "windows")]
+const KEYEVENTF_KEYUP: u32 = 0x0002;
+#[cfg(target_os = "windows")]
+const KEYEVENTF_UNICODE: u32 = 0x0004;
+
+#[cfg(target_os = "windows")]
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct MouseInput {
+    dx: i32,
+    dy: i32,
+    mouse_data: u32,
+    flags: u32,
+    time: u32,
+    extra_info: usize,
+}
+
+#[cfg(target_os = "windows")]
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct KeyboardInput {
+    virtual_key: u16,
+    scan: u16,
+    flags: u32,
+    time: u32,
+    extra_info: usize,
+}
+
+#[cfg(target_os = "windows")]
+#[repr(C)]
+#[derive(Clone, Copy)]
+union WinInputValue {
+    mouse: MouseInput,
+    keyboard: KeyboardInput,
+}
+
+#[cfg(target_os = "windows")]
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct WinInput {
+    input_type: u32,
+    value: WinInputValue,
+}
+
+#[cfg(target_os = "windows")]
+#[link(name = "user32")]
+unsafe extern "system" {
+    fn SetCursorPos(x: i32, y: i32) -> i32;
+    fn SendInput(count: u32, inputs: *const WinInput, input_size: i32) -> u32;
+    fn VkKeyScanW(character: u16) -> i16;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn windows_key_aliases_cover_cross_platform_action_names() {
+        assert_eq!(named_windows_virtual_key("cmd"), Some(0x5b));
+        assert_eq!(named_windows_virtual_key("control"), Some(0x11));
+        assert_eq!(named_windows_virtual_key("escape"), Some(0x1b));
+        assert_eq!(named_windows_virtual_key("arrowleft"), Some(0x25));
+        assert_eq!(named_windows_virtual_key("backspace"), Some(0x08));
+    }
+
+    #[test]
+    fn windows_backend_aliases_are_explicit() {
+        assert_eq!(backend_by_name("windows").name(), "native-windows");
+        assert_eq!(backend_by_name("win32").name(), "native-windows");
+        assert_eq!(backend_by_name("native-windows").name(), "native-windows");
+    }
 }

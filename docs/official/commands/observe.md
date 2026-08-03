@@ -25,3 +25,5 @@ ferrisgrid observe
 The output includes screenshot paths immediately after capture, the `image_size_limit` used for downsampling, plus dimensions and coordinate metadata for each screen.
 
 `balanced` keeps at least an 800 px long edge and raises that cap on wide screens to preserve roughly a 500 px short edge. FerrisGrid never upscales screenshots.
+
+On Windows, `native` selects the DPI-aware Win32 backend. `native-windows`, `windows`, and `win32` are equivalent explicit names. Monitor origins may be negative when a display is positioned left of or above the primary display; FerrisGrid keeps normalized coordinates screen-local.

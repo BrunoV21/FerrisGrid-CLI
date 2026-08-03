@@ -54,6 +54,12 @@ npm install -g ferrisgrid-cli
 ferrisgrid doctor
 ```
 
+### Windows
+
+Windows 10/11 x64 is supported natively. `ferrisgrid observe`, the complete mouse and keyboard action catalog, DPI-aware coordinates, multi-monitor layouts, and post-action captures use Win32 APIs. Run FerrisGrid from an unlocked interactive desktop. Windows can reject input aimed at an elevated application or the secure desktop; run the target and FerrisGrid at the same integrity level.
+
+Use `--backend native-windows` (aliases: `windows`, `win32`) to select it explicitly. The default `native` backend selects Windows automatically.
+
 ## Quick Start
 
 Capture the current screen:
@@ -90,6 +96,13 @@ cargo build
 cargo test --workspace
 cargo run -q -p ferrisgrid-cli -- doctor
 cargo run -q -p ferrisgrid-cli -- observe
+```
+
+On Windows, the CI-equivalent native desktop suite can be run against a built binary:
+
+```powershell
+cargo build -p ferrisgrid-cli
+.\scripts\windows-native-e2e.ps1 -FerrisGridBinary (Resolve-Path .\target\debug\ferrisgrid.exe)
 ```
 
 Run one source-built action from a Markdown action file:

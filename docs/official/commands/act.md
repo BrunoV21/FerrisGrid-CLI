@@ -41,3 +41,5 @@ FerrisGrid validates action type, fields, coordinates, target screen, and policy
 Non-screen actions such as `type`, `press_key`, `hotkey`, and `wait` do not require `screen_id`.
 
 Terminal statuses such as `status: done` and `status: fail` do not execute input and do not capture a post-action screenshot; their result reports `screens: 0`.
+
+On Windows, native actions use physical, per-monitor-DPI-aware coordinates. Run FerrisGrid and the controlled application at the same elevation level because Windows blocks synthetic input crossing into an elevated or secure desktop.

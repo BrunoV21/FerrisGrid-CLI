@@ -35,6 +35,12 @@ Run the CLI through Cargo:
 cargo run -q -p ferrisgrid-cli -- doctor
 ```
 
+## Windows
+
+FerrisGrid supports Windows 10/11 x64 from an interactive desktop session. The default `native` backend selects the Win32 capture and input implementation; `native-windows`, `windows`, and `win32` select it explicitly.
+
+Windows has no Screen Recording prompt, but input to elevated applications and the secure desktop can be blocked. Run FerrisGrid and the application being controlled at the same elevation level. ARM64 is not part of the initial Windows release.
+
 ## Environment variables
 
 | Variable | Purpose |

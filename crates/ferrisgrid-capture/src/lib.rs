@@ -5,6 +5,7 @@ use ferrisgrid_core::{
 use image::{DynamicImage, ImageReader, Rgba, RgbaImage, imageops::FilterType};
 use std::fs;
 use std::path::{Path, PathBuf};
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::process::Command;
 
 pub struct FakeCaptureBackend;
@@ -207,12 +208,74 @@ impl CaptureBackend for LinuxCaptureBackend {
     }
 }
 
+pub struct WindowsCaptureBackend;
+
+impl CaptureBackend for WindowsCaptureBackend {
+    fn name(&self) -> &'static str {
+        "native-windows"
+    }
+
+    fn list_screens(&self) -> Result<Vec<ScreenInfo>> {
+        windows_screens()
+    }
+
+    fn capture(
+        &self,
+        target: CaptureTarget,
+        frame_dir: &Path,
+        format: &ImageFormat,
+        grid_overlay: bool,
+        image_size_limit: ImageSizeLimit,
+    ) -> Result<Vec<CapturedScreen>> {
+        #[cfg(target_os = "windows")]
+        {
+            let screens = select_screens(windows_screens()?, target)?;
+            fs::create_dir_all(frame_dir)?;
+            let mut captured = Vec::new();
+            for screen in screens {
+                let screenshot_path =
+                    frame_dir.join(format!("{}.{}", screen.screen_id, format.extension()));
+                capture_windows_display(&screen, &screenshot_path)?;
+                downsample_image(&screenshot_path, image_size_limit)?;
+                if grid_overlay {
+                    apply_grid_overlay(&screenshot_path)?;
+                }
+                let (image_width, image_height) = image_dimensions(&screenshot_path)?;
+                let metadata_path = write_metadata(
+                    frame_dir,
+                    &screen,
+                    &screenshot_path,
+                    image_width,
+                    image_height,
+                )?;
+                captured.push(CapturedScreen {
+                    screen,
+                    image_width,
+                    image_height,
+                    screenshot_path,
+                    metadata_path,
+                });
+            }
+            Ok(captured)
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = (target, frame_dir, format, grid_overlay, image_size_limit);
+            Err(FerrisError::new(
+                ErrorKind::Platform,
+                "native Windows capture is only available on Windows; use --backend native on this OS or --backend fake",
+            ))
+        }
+    }
+}
+
 pub fn backend_by_name(name: &str) -> Box<dyn CaptureBackend> {
     match name {
         "fake" => Box::new(FakeCaptureBackend),
         "native" => native_backend(),
         "macos" | "native-macos" => Box::new(MacOsCaptureBackend),
         "linux" | "x11" | "native-linux" | "native-linux-x11" => Box::new(LinuxCaptureBackend),
+        "windows" | "win32" | "native-windows" => Box::new(WindowsCaptureBackend),
         _ => native_backend(),
     }
 }
@@ -226,7 +289,11 @@ fn native_backend() -> Box<dyn CaptureBackend> {
     {
         Box::new(MacOsCaptureBackend)
     }
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    #[cfg(target_os = "windows")]
+    {
+        Box::new(WindowsCaptureBackend)
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
     {
         Box::new(MacOsCaptureBackend)
     }
@@ -351,6 +418,218 @@ fn linux_screens() -> Result<Vec<ScreenInfo>> {
         ));
     }
     Ok(screens)
+}
+
+#[cfg(target_os = "windows")]
+fn windows_screens() -> Result<Vec<ScreenInfo>> {
+    set_windows_dpi_awareness();
+    let mut screens = Vec::<ScreenInfo>::new();
+    let success = unsafe {
+        EnumDisplayMonitors(
+            std::ptr::null_mut(),
+            std::ptr::null(),
+            Some(collect_windows_monitor),
+            (&mut screens as *mut Vec<ScreenInfo>) as isize,
+        )
+    };
+    if success == 0 {
+        return Err(windows_capture_error("EnumDisplayMonitors failed"));
+    }
+    if screens.is_empty() {
+        return Err(FerrisError::new(
+            ErrorKind::Capture,
+            "Windows returned no displays; run FerrisGrid from a logged-in interactive desktop session",
+        ));
+    }
+    Ok(normalize_screen_order(screens))
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn normalize_screen_order(mut screens: Vec<ScreenInfo>) -> Vec<ScreenInfo> {
+    screens.sort_by_key(|screen| {
+        (
+            !screen.is_primary,
+            screen.origin_y,
+            screen.origin_x,
+            screen.name.clone(),
+        )
+    });
+    for (index, screen) in screens.iter_mut().enumerate() {
+        screen.screen_id = format!("screen-{}", index + 1);
+    }
+    screens
+}
+
+#[cfg(not(target_os = "windows"))]
+fn windows_screens() -> Result<Vec<ScreenInfo>> {
+    Err(FerrisError::new(
+        ErrorKind::Platform,
+        "native Windows capture is only available on Windows",
+    ))
+}
+
+#[cfg(target_os = "windows")]
+unsafe extern "system" fn collect_windows_monitor(
+    monitor: *mut std::ffi::c_void,
+    _dc: *mut std::ffi::c_void,
+    _rect: *mut WinRect,
+    context: isize,
+) -> i32 {
+    let mut info = MonitorInfoExW {
+        cb_size: std::mem::size_of::<MonitorInfoExW>() as u32,
+        rc_monitor: WinRect::default(),
+        rc_work: WinRect::default(),
+        flags: 0,
+        device: [0; 32],
+    };
+    if unsafe { GetMonitorInfoW(monitor, &mut info) } == 0 {
+        return 1;
+    }
+    let rect = info.rc_monitor;
+    let width = rect.right.saturating_sub(rect.left).max(1) as u32;
+    let height = rect.bottom.saturating_sub(rect.top).max(1) as u32;
+    let name_end = info
+        .device
+        .iter()
+        .position(|value| *value == 0)
+        .unwrap_or(info.device.len());
+    let name = String::from_utf16_lossy(&info.device[..name_end]);
+    let mut dpi_x = 96_u32;
+    let mut dpi_y = 96_u32;
+    let scale_factor = if unsafe { GetDpiForMonitor(monitor, 0, &mut dpi_x, &mut dpi_y) } == 0 {
+        dpi_x as f32 / 96.0
+    } else {
+        1.0
+    };
+    let screens = unsafe { &mut *(context as *mut Vec<ScreenInfo>) };
+    screens.push(ScreenInfo {
+        screen_id: String::new(),
+        name: if name.is_empty() {
+            "Windows Display".to_string()
+        } else {
+            name
+        },
+        is_primary: info.flags & MONITORINFOF_PRIMARY != 0,
+        origin_x: rect.left,
+        origin_y: rect.top,
+        native_width: width,
+        native_height: height,
+        scale_factor,
+    });
+    1
+}
+
+#[cfg(target_os = "windows")]
+fn set_windows_dpi_awareness() {
+    // This can legitimately fail when a host has already fixed the process DPI mode.
+    unsafe {
+        SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn capture_windows_display(screen: &ScreenInfo, screenshot_path: &Path) -> Result<()> {
+    set_windows_dpi_awareness();
+    let width = screen.native_width.max(1);
+    let height = screen.native_height.max(1);
+    let desktop_dc = unsafe { GetDC(std::ptr::null_mut()) };
+    if desktop_dc.is_null() {
+        return Err(windows_capture_error("GetDC failed"));
+    }
+    let memory_dc = unsafe { CreateCompatibleDC(desktop_dc) };
+    if memory_dc.is_null() {
+        unsafe { ReleaseDC(std::ptr::null_mut(), desktop_dc) };
+        return Err(windows_capture_error("CreateCompatibleDC failed"));
+    }
+    let bitmap = unsafe { CreateCompatibleBitmap(desktop_dc, width as i32, height as i32) };
+    if bitmap.is_null() {
+        unsafe {
+            DeleteDC(memory_dc);
+            ReleaseDC(std::ptr::null_mut(), desktop_dc);
+        }
+        return Err(windows_capture_error("CreateCompatibleBitmap failed"));
+    }
+    let previous = unsafe { SelectObject(memory_dc, bitmap) };
+    let copied = unsafe {
+        BitBlt(
+            memory_dc,
+            0,
+            0,
+            width as i32,
+            height as i32,
+            desktop_dc,
+            screen.origin_x,
+            screen.origin_y,
+            SRCCOPY | CAPTUREBLT,
+        )
+    };
+    unsafe {
+        SelectObject(memory_dc, previous);
+    }
+    let mut pixels = vec![0_u8; width as usize * height as usize * 4];
+    let mut bitmap_info = BitmapInfo {
+        header: BitmapInfoHeader {
+            size: std::mem::size_of::<BitmapInfoHeader>() as u32,
+            width: width as i32,
+            height: -(height as i32),
+            planes: 1,
+            bit_count: 32,
+            compression: BI_RGB,
+            size_image: 0,
+            x_pixels_per_meter: 0,
+            y_pixels_per_meter: 0,
+            colors_used: 0,
+            colors_important: 0,
+        },
+        colors: [RgbQuad::default()],
+    };
+    let rows = if copied != 0 {
+        unsafe {
+            GetDIBits(
+                desktop_dc,
+                bitmap,
+                0,
+                height,
+                pixels.as_mut_ptr().cast(),
+                &mut bitmap_info,
+                DIB_RGB_COLORS,
+            )
+        }
+    } else {
+        0
+    };
+    unsafe {
+        DeleteObject(bitmap);
+        DeleteDC(memory_dc);
+        ReleaseDC(std::ptr::null_mut(), desktop_dc);
+    }
+    if copied == 0 || rows != height as i32 {
+        return Err(windows_capture_error(
+            "Windows screen capture failed; ensure FerrisGrid is running in an unlocked interactive desktop session",
+        ));
+    }
+    for pixel in pixels.chunks_exact_mut(4) {
+        pixel.swap(0, 2);
+        pixel[3] = 255;
+    }
+    let image = RgbaImage::from_raw(width, height, pixels).ok_or_else(|| {
+        FerrisError::new(
+            ErrorKind::Capture,
+            "Windows screen capture returned an invalid pixel buffer",
+        )
+    })?;
+    DynamicImage::ImageRgba8(image)
+        .save(screenshot_path)
+        .map_err(|error| FerrisError::new(ErrorKind::Capture, error.to_string()))?;
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn windows_capture_error(context: &str) -> FerrisError {
+    FerrisError::new(
+        ErrorKind::Capture,
+        format!("{context}: {}", std::io::Error::last_os_error()),
+    )
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -998,6 +1277,142 @@ unsafe extern "C" {
     fn CGDisplayPixelsHigh(display: u32) -> usize;
 }
 
+#[cfg(target_os = "windows")]
+const MONITORINFOF_PRIMARY: u32 = 1;
+#[cfg(target_os = "windows")]
+const DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2: isize = -4;
+#[cfg(target_os = "windows")]
+const SRCCOPY: u32 = 0x00cc_0020;
+#[cfg(target_os = "windows")]
+const CAPTUREBLT: u32 = 0x4000_0000;
+#[cfg(target_os = "windows")]
+const BI_RGB: u32 = 0;
+#[cfg(target_os = "windows")]
+const DIB_RGB_COLORS: u32 = 0;
+
+#[cfg(target_os = "windows")]
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct WinRect {
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+}
+
+#[cfg(target_os = "windows")]
+#[repr(C)]
+struct MonitorInfoExW {
+    cb_size: u32,
+    rc_monitor: WinRect,
+    rc_work: WinRect,
+    flags: u32,
+    device: [u16; 32],
+}
+
+#[cfg(target_os = "windows")]
+#[repr(C)]
+struct BitmapInfoHeader {
+    size: u32,
+    width: i32,
+    height: i32,
+    planes: u16,
+    bit_count: u16,
+    compression: u32,
+    size_image: u32,
+    x_pixels_per_meter: i32,
+    y_pixels_per_meter: i32,
+    colors_used: u32,
+    colors_important: u32,
+}
+
+#[cfg(target_os = "windows")]
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct RgbQuad {
+    blue: u8,
+    green: u8,
+    red: u8,
+    reserved: u8,
+}
+
+#[cfg(target_os = "windows")]
+#[repr(C)]
+struct BitmapInfo {
+    header: BitmapInfoHeader,
+    colors: [RgbQuad; 1],
+}
+
+#[cfg(target_os = "windows")]
+#[link(name = "user32")]
+unsafe extern "system" {
+    fn EnumDisplayMonitors(
+        dc: *mut std::ffi::c_void,
+        clip: *const WinRect,
+        callback: Option<
+            unsafe extern "system" fn(
+                *mut std::ffi::c_void,
+                *mut std::ffi::c_void,
+                *mut WinRect,
+                isize,
+            ) -> i32,
+        >,
+        context: isize,
+    ) -> i32;
+    fn GetMonitorInfoW(monitor: *mut std::ffi::c_void, info: *mut MonitorInfoExW) -> i32;
+    fn SetProcessDpiAwarenessContext(context: isize) -> i32;
+    fn GetDC(window: *mut std::ffi::c_void) -> *mut std::ffi::c_void;
+    fn ReleaseDC(window: *mut std::ffi::c_void, dc: *mut std::ffi::c_void) -> i32;
+}
+
+#[cfg(target_os = "windows")]
+#[link(name = "shcore")]
+unsafe extern "system" {
+    fn GetDpiForMonitor(
+        monitor: *mut std::ffi::c_void,
+        dpi_type: i32,
+        dpi_x: *mut u32,
+        dpi_y: *mut u32,
+    ) -> i32;
+}
+
+#[cfg(target_os = "windows")]
+#[link(name = "gdi32")]
+unsafe extern "system" {
+    fn CreateCompatibleDC(dc: *mut std::ffi::c_void) -> *mut std::ffi::c_void;
+    fn CreateCompatibleBitmap(
+        dc: *mut std::ffi::c_void,
+        width: i32,
+        height: i32,
+    ) -> *mut std::ffi::c_void;
+    fn SelectObject(
+        dc: *mut std::ffi::c_void,
+        object: *mut std::ffi::c_void,
+    ) -> *mut std::ffi::c_void;
+    fn BitBlt(
+        destination: *mut std::ffi::c_void,
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+        source: *mut std::ffi::c_void,
+        source_x: i32,
+        source_y: i32,
+        operation: u32,
+    ) -> i32;
+    fn GetDIBits(
+        dc: *mut std::ffi::c_void,
+        bitmap: *mut std::ffi::c_void,
+        start: u32,
+        lines: u32,
+        bits: *mut std::ffi::c_void,
+        info: *mut BitmapInfo,
+        usage: u32,
+    ) -> i32;
+    fn DeleteObject(object: *mut std::ffi::c_void) -> i32;
+    fn DeleteDC(dc: *mut std::ffi::c_void) -> i32;
+}
+
 trait Pipe: Sized {
     fn pipe<T>(self, f: impl FnOnce(Self) -> T) -> T {
         f(self)
@@ -1076,5 +1491,43 @@ mod tests {
         };
 
         assert_eq!(scaled_dimensions(640, 400, limit), (640, 400));
+    }
+
+    #[test]
+    fn windows_backend_aliases_are_explicit() {
+        assert_eq!(backend_by_name("windows").name(), "native-windows");
+        assert_eq!(backend_by_name("win32").name(), "native-windows");
+        assert_eq!(backend_by_name("native-windows").name(), "native-windows");
+    }
+
+    #[test]
+    fn windows_screen_order_is_primary_first_and_preserves_negative_origins() {
+        let screens = normalize_screen_order(vec![
+            ScreenInfo {
+                screen_id: String::new(),
+                name: "Left".to_string(),
+                is_primary: false,
+                origin_x: -1920,
+                origin_y: 0,
+                native_width: 1920,
+                native_height: 1080,
+                scale_factor: 1.0,
+            },
+            ScreenInfo {
+                screen_id: String::new(),
+                name: "Primary".to_string(),
+                is_primary: true,
+                origin_x: 0,
+                origin_y: 0,
+                native_width: 2560,
+                native_height: 1440,
+                scale_factor: 1.5,
+            },
+        ]);
+
+        assert_eq!(screens[0].screen_id, "screen-1");
+        assert_eq!(screens[0].name, "Primary");
+        assert_eq!(screens[1].screen_id, "screen-2");
+        assert_eq!(screens[1].origin_x, -1920);
     }
 }

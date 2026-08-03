@@ -147,7 +147,7 @@ fn ffmpeg_error(error: io::Error) -> FerrisError {
     if error.kind() == io::ErrorKind::NotFound {
         return FerrisError::new(
             ErrorKind::Execution,
-            "ffmpeg not found; install it with `brew install ffmpeg` or ensure ffmpeg is on PATH",
+            "ffmpeg not found; install ffmpeg for your operating system and ensure it is on PATH",
         );
     }
     FerrisError::new(
