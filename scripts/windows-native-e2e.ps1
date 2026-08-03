@@ -15,11 +15,11 @@ function Wait-For([scriptblock]$Condition, [int]$TimeoutSeconds = 15) {
         try { if (& $Condition) { return } } catch { }
         Start-Sleep -Milliseconds 100
     }
-    $fixtureState = if (Test-Path $statePath) { Get-Content -Raw $statePath } else { "unavailable" }
+    $fixtureState = if (Test-Path $statePath) { Get-Content -Raw -Encoding UTF8 $statePath } else { "unavailable" }
     throw "native Windows E2E condition timed out; fixture state: $fixtureState"
 }
 
-function Get-State { Get-Content -Raw $statePath | ConvertFrom-Json }
+function Get-State { Get-Content -Raw -Encoding UTF8 $statePath | ConvertFrom-Json }
 function To-Normalized([int]$Value, [int]$Origin, [int]$Size) { [Math]::Max(0, [Math]::Min(1000, [Math]::Round((($Value - $Origin) / [double]$Size) * 1000))) }
 function Invoke-Ferris([string[]]$Arguments) {
     & $FerrisGridBinary @Arguments | Out-Host
