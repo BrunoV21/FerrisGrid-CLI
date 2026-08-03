@@ -60,4 +60,4 @@ body:
     id: context
     attributes:
       label: Additional context
-      description: Screenshots, environment variables, backend selection, or permission details.
+      description: Screenshots, environment variables, backend selection, Windows elevation/interactive-desktop details, or permission details.
