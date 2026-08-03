@@ -58,7 +58,7 @@ dependencies = [
 
 [[package]]
 name = "ferrisgrid-capture"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "ferrisgrid-core",
  "image",
@@ -66,7 +66,7 @@ dependencies = [
 
 [[package]]
 name = "ferrisgrid-cli"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "ferrisgrid-capture",
  "ferrisgrid-core",
@@ -76,18 +76,18 @@ dependencies = [
 
 [[package]]
 name = "ferrisgrid-core"
-version = "0.2.0"
+version = "0.3.0"
 
 [[package]]
 name = "ferrisgrid-export"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "ferrisgrid-core",
 ]
 
 [[package]]
 name = "ferrisgrid-input"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "ferrisgrid-core",
 ]

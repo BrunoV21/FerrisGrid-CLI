@@ -56,6 +56,7 @@ ferrisgrid doctor
 - [Community](https://raw.githubusercontent.com/BrunoV21/FerrisGrid-CLI/main/docs/official/community.md)
 - [Roadmap](https://raw.githubusercontent.com/BrunoV21/FerrisGrid-CLI/main/docs/official/roadmap.md)
 - [Release notes](https://raw.githubusercontent.com/BrunoV21/FerrisGrid-CLI/main/docs/official/releases/index.md)
+- [FerrisGrid v0.3.0 release notes](https://raw.githubusercontent.com/BrunoV21/FerrisGrid-CLI/main/docs/official/releases/v0.3.0.md)
 - [FerrisGrid v0.2.0 release notes](https://raw.githubusercontent.com/BrunoV21/FerrisGrid-CLI/main/docs/official/releases/v0.2.0.md)
 - [FerrisGrid v0.1.0 release notes](https://raw.githubusercontent.com/BrunoV21/FerrisGrid-CLI/main/docs/official/releases/v0.1.0.md)
 

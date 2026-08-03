@@ -12,7 +12,7 @@ name = "ferrisgrid"
 path = "src/main.rs"
 
 [dependencies]
-ferrisgrid-core = { path = "../ferrisgrid-core", version = "0.2.0" }
-ferrisgrid-capture = { path = "../ferrisgrid-capture", version = "0.2.0" }
-ferrisgrid-input = { path = "../ferrisgrid-input", version = "0.2.0" }
-ferrisgrid-export = { path = "../ferrisgrid-export", version = "0.2.0" }
+ferrisgrid-core = { path = "../ferrisgrid-core", version = "0.3.0" }
+ferrisgrid-capture = { path = "../ferrisgrid-capture", version = "0.3.0" }
+ferrisgrid-input = { path = "../ferrisgrid-input", version = "0.3.0" }
+ferrisgrid-export = { path = "../ferrisgrid-export", version = "0.3.0" }

@@ -16,7 +16,7 @@ Build a specific published version:
 
 ```bash
 docker build \
-  --build-arg FERRISGRID_VERSION=0.2.0 \
+  --build-arg FERRISGRID_VERSION=0.3.0 \
   -f docker/linux-workspace.Dockerfile \
   -t ferrisgrid-linux-workspace .
 ```
