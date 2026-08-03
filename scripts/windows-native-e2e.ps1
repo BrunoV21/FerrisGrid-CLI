@@ -36,10 +36,12 @@ try {
     $observation = & $FerrisGridBinary observe --backend native-windows --output-dir $tracePath --session e2e --format png --grid-overlay false --resolution fast
     if ($LASTEXITCODE -ne 0) { throw "native observation failed" }
     $observation | Out-Host
-    $originX = [int]([regex]::Match(($observation -join "`n"), "- origin_x: (-?\d+)").Groups[1].Value)
-    $originY = [int]([regex]::Match(($observation -join "`n"), "- origin_y: (-?\d+)").Groups[1].Value)
-    $width = [int]([regex]::Match(($observation -join "`n"), "- native_width: (\d+)").Groups[1].Value)
-    $height = [int]([regex]::Match(($observation -join "`n"), "- native_height: (\d+)").Groups[1].Value)
+    $screenLine = [regex]::Match(($observation -join "`n"), "- screen: screen-1 .*?native=(\d+)x(\d+) origin=(-?\d+),(-?\d+)")
+    if (-not $screenLine.Success) { throw "native observation did not contain screen-1 geometry" }
+    $width = [int]$screenLine.Groups[1].Value
+    $height = [int]$screenLine.Groups[2].Value
+    $originX = [int]$screenLine.Groups[3].Value
+    $originY = [int]$screenLine.Groups[4].Value
     $initial = Get-State
     $c = $initial.coordinates
     $surfaceX = To-Normalized $c.surfaceX $originX $width; $surfaceY = To-Normalized $c.surfaceY $originY $height
