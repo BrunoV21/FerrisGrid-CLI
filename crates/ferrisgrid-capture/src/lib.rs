@@ -332,6 +332,7 @@ fn native_screens() -> Result<Vec<NativeScreen>> {
             NativeScreen {
                 info: ScreenInfo {
                     screen_id: String::new(),
+                    display_fingerprint: format!("macos-display-{display_id}"),
                     name: if *display_id == main_display {
                         "Main Display".to_string()
                     } else {
@@ -340,6 +341,8 @@ fn native_screens() -> Result<Vec<NativeScreen>> {
                     is_primary: *display_id == main_display,
                     origin_x: bounds.origin.x.round() as i32,
                     origin_y: bounds.origin.y.round() as i32,
+                    logical_width: bounds.size.width.round().max(1.0) as u32,
+                    logical_height: bounds.size.height.round().max(1.0) as u32,
                     native_width,
                     native_height,
                     scale_factor,
@@ -504,6 +507,7 @@ unsafe extern "system" fn collect_windows_monitor(
     let screens = unsafe { &mut *(context as *mut Vec<ScreenInfo>) };
     screens.push(ScreenInfo {
         screen_id: String::new(),
+        display_fingerprint: format!("windows-{name}"),
         name: if name.is_empty() {
             "Windows Display".to_string()
         } else {
@@ -512,6 +516,8 @@ unsafe extern "system" fn collect_windows_monitor(
         is_primary: info.flags & MONITORINFOF_PRIMARY != 0,
         origin_x: rect.left,
         origin_y: rect.top,
+        logical_width: width,
+        logical_height: height,
         native_width: width,
         native_height: height,
         scale_factor,
@@ -716,15 +722,16 @@ fn parse_xrandr_screen(line: &str) -> Option<ScreenInfo> {
         return None;
     }
     let is_primary = line.split_whitespace().any(|field| field == "primary");
-    let geometry = line
-        .split_whitespace()
-        .find_map(|field| parse_geometry(field))?;
+    let geometry = line.split_whitespace().find_map(parse_geometry)?;
     Some(ScreenInfo {
         screen_id: String::new(),
+        display_fingerprint: format!("x11-{name}"),
         name,
         is_primary,
         origin_x: geometry.2,
         origin_y: geometry.3,
+        logical_width: geometry.0,
+        logical_height: geometry.1,
         native_width: geometry.0,
         native_height: geometry.1,
         scale_factor: 1.0,
@@ -759,10 +766,13 @@ fn parse_xdpyinfo_screens(output: &str) -> Vec<ScreenInfo> {
             let (width, height) = dimensions.split_once('x')?;
             Some(vec![ScreenInfo {
                 screen_id: "screen-1".to_string(),
+                display_fingerprint: "x11-default".to_string(),
                 name: "X11 Screen".to_string(),
                 is_primary: true,
                 origin_x: 0,
                 origin_y: 0,
+                logical_width: width.parse().ok()?,
+                logical_height: height.parse().ok()?,
                 native_width: width.parse().ok()?,
                 native_height: height.parse().ok()?,
                 scale_factor: 1.0,
@@ -799,20 +809,26 @@ fn fake_screens() -> Vec<ScreenInfo> {
     vec![
         ScreenInfo {
             screen_id: "screen-1".to_string(),
+            display_fingerprint: "fake-primary".to_string(),
             name: "Fake Primary".to_string(),
             is_primary: true,
             origin_x: 0,
             origin_y: 0,
+            logical_width: 1512,
+            logical_height: 982,
             native_width: 3024,
             native_height: 1964,
             scale_factor: 2.0,
         },
         ScreenInfo {
             screen_id: "screen-2".to_string(),
+            display_fingerprint: "fake-secondary".to_string(),
             name: "Fake Secondary".to_string(),
             is_primary: false,
-            origin_x: 3024,
+            origin_x: 1512,
             origin_y: 0,
+            logical_width: 2560,
+            logical_height: 1440,
             native_width: 2560,
             native_height: 1440,
             scale_factor: 1.0,
@@ -911,11 +927,14 @@ fn write_metadata(
     fs::write(
         &metadata_path,
         format!(
-            "## Screen Metadata\n- screen_id: {}\n- name: {}\n- coordinate_mode: normalized-1000\n- coordinate_range: x=0..1000 y=0..1000\n- coordinate_origin: top_left\n- coordinate_scope: screen_local\n- image_mapping: image_x=round(x/1000*(image_width-1)) image_y=round(y/1000*(image_height-1))\n- native_mapping: native_x=origin_x+round(x/1000*native_width) native_y=origin_y+round(y/1000*native_height)\n- origin_x: {}\n- origin_y: {}\n- native_width: {}\n- native_height: {}\n- image_width: {}\n- image_height: {}\n- scale_factor: {}\n- is_primary: {}\n- screenshot: {}\n",
+            "## Screen Metadata\n- screen_id: {}\n- display_fingerprint: {}\n- name: {}\n- coordinate_mode: normalized-1000\n- coordinate_range: x=0..1000 y=0..1000\n- coordinate_origin: top_left\n- coordinate_scope: screen_local\n- image_mapping: image_x=round(x/1000*(image_width-1)) image_y=round(y/1000*(image_height-1))\n- desktop_mapping: desktop_x=origin_x+round(x/1000*logical_width) desktop_y=origin_y+round(y/1000*logical_height)\n- origin_x: {}\n- origin_y: {}\n- logical_width: {}\n- logical_height: {}\n- native_width: {}\n- native_height: {}\n- image_width: {}\n- image_height: {}\n- scale_factor: {}\n- is_primary: {}\n- screenshot: {}\n",
             screen.screen_id,
+            screen.display_fingerprint,
             screen.name,
             screen.origin_x,
             screen.origin_y,
+            screen.logical_width,
+            screen.logical_height,
             screen.native_width,
             screen.native_height,
             image_width,
@@ -1505,20 +1524,26 @@ mod tests {
         let screens = normalize_screen_order(vec![
             ScreenInfo {
                 screen_id: String::new(),
+                display_fingerprint: "windows-left".to_string(),
                 name: "Left".to_string(),
                 is_primary: false,
                 origin_x: -1920,
                 origin_y: 0,
+                logical_width: 1920,
+                logical_height: 1080,
                 native_width: 1920,
                 native_height: 1080,
                 scale_factor: 1.0,
             },
             ScreenInfo {
                 screen_id: String::new(),
+                display_fingerprint: "windows-primary".to_string(),
                 name: "Primary".to_string(),
                 is_primary: true,
                 origin_x: 0,
                 origin_y: 0,
+                logical_width: 2560,
+                logical_height: 1440,
                 native_width: 2560,
                 native_height: 1440,
                 scale_factor: 1.5,

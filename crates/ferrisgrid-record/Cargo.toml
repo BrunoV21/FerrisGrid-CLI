@@ -1,0 +1,15 @@
+[package]
+name = "ferrisgrid-record"
+description = "Human demonstration recording and sequence replay for FerrisGrid."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+
+[dependencies]
+ferrisgrid-core = { path = "../ferrisgrid-core", version = "0.3.0" }
+ctrlc = "3.4"
+
+[dev-dependencies]
+ferrisgrid-capture = { path = "../ferrisgrid-capture", version = "0.3.0" }

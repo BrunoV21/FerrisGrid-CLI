@@ -4,6 +4,7 @@ members = [
   "crates/ferrisgrid-core",
   "crates/ferrisgrid-capture",
   "crates/ferrisgrid-input",
+  "crates/ferrisgrid-record",
   "crates/ferrisgrid-export",
 ]
 resolver = "3"

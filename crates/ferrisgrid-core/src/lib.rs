@@ -70,10 +70,13 @@ impl ErrorKind {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ScreenInfo {
     pub screen_id: String,
+    pub display_fingerprint: String,
     pub name: String,
     pub is_primary: bool,
     pub origin_x: i32,
     pub origin_y: i32,
+    pub logical_width: u32,
+    pub logical_height: u32,
     pub native_width: u32,
     pub native_height: u32,
     pub scale_factor: f32,
@@ -226,6 +229,7 @@ pub struct DoctorReport {
     pub output_dir: String,
     pub screens: Vec<ScreenInfo>,
     pub ffmpeg: String,
+    pub recording: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -474,7 +478,7 @@ pub struct InputCapabilities {
     pub can_keyboard: bool,
 }
 
-pub trait CaptureBackend {
+pub trait CaptureBackend: Send + Sync {
     fn name(&self) -> &'static str;
     fn list_screens(&self) -> Result<Vec<ScreenInfo>>;
     fn capture(
@@ -487,7 +491,7 @@ pub trait CaptureBackend {
     ) -> Result<Vec<CapturedScreen>>;
 }
 
-pub trait InputBackend {
+pub trait InputBackend: Send + Sync {
     fn name(&self) -> &'static str;
     fn capabilities(&self) -> InputCapabilities;
     fn execute(&self, action: &NativeAction) -> Result<InputExecution>;
@@ -560,6 +564,36 @@ impl SessionStore {
         self.ensure_root()?;
         let session_id = new_session_id();
         let session_dir = self.root.join("sessions").join(session_id);
+        if session_dir.exists() {
+            return Err(FerrisError::new(
+                ErrorKind::Storage,
+                format!("session already exists: {}", session_dir.display()),
+            ));
+        }
+        self.ensure_session_dirs(&session_dir)?;
+        Ok(session_dir)
+    }
+
+    pub fn create_exclusive_session(&self, requested: Option<&str>) -> Result<PathBuf> {
+        let Some(value) = requested else {
+            return self.create_session();
+        };
+        self.ensure_root()?;
+        let path = PathBuf::from(value);
+        let session_dir = if path.exists() || value.contains('/') {
+            path
+        } else {
+            self.root.join("sessions").join(value)
+        };
+        if session_dir.exists() {
+            return Err(FerrisError::new(
+                ErrorKind::Storage,
+                format!(
+                    "session already exists and will not be overwritten: {}",
+                    session_dir.display()
+                ),
+            ));
+        }
         self.ensure_session_dirs(&session_dir)?;
         Ok(session_dir)
     }
@@ -589,10 +623,10 @@ impl SessionStore {
             if !entry.file_type()?.is_dir() {
                 continue;
             }
-            if let Some(name) = entry.file_name().to_str() {
-                if let Ok(step) = name.parse::<u32>() {
-                    max_step = max_step.max(step);
-                }
+            if let Some(name) = entry.file_name().to_str()
+                && let Ok(step) = name.parse::<u32>()
+            {
+                max_step = max_step.max(step);
             }
         }
         Ok(max_step + 1)
@@ -944,11 +978,13 @@ pub fn render_observation(result: &ObserveResult) -> String {
     out.push_str(&format!("- screens: {}\n", result.screens.len()));
     for screen in &result.screens {
         out.push_str(&format!(
-            "- screen: {} primary={} image={}x{} native={}x{} origin={},{} coords=x:0..1000,y:0..1000 screenshot={} metadata={}\n",
+            "- screen: {} primary={} image={}x{} logical={}x{} native={}x{} origin={},{} coords=x:0..1000,y:0..1000 screenshot={} metadata={}\n",
             screen.screen.screen_id,
             screen.screen.is_primary,
             screen.image_width,
             screen.image_height,
+            screen.screen.logical_width,
+            screen.screen.logical_height,
             screen.screen.native_width,
             screen.screen.native_height,
             screen.screen.origin_x,
@@ -957,14 +993,14 @@ pub fn render_observation(result: &ObserveResult) -> String {
             screen.metadata_path.display()
         ));
         out.push_str(&format!(
-            "- map: {} image_x=round(x/1000*{}) image_y=round(y/1000*{}) native_x={}+round(x/1000*{}) native_y={}+round(y/1000*{})\n",
+            "- map: {} image_x=round(x/1000*{}) image_y=round(y/1000*{}) desktop_x={}+round(x/1000*{}) desktop_y={}+round(y/1000*{})\n",
             screen.screen.screen_id,
             screen.image_width.saturating_sub(1),
             screen.image_height.saturating_sub(1),
             screen.screen.origin_x,
-            screen.screen.native_width,
+            screen.screen.logical_width,
             screen.screen.origin_y,
-            screen.screen.native_height
+            screen.screen.logical_height
         ));
     }
     out
@@ -993,11 +1029,13 @@ pub fn render_action_result(result: &ActResult) -> String {
     out.push_str("- coordinate_range: x=0..1000 y=0..1000 origin=top_left scope=screen_local\n");
     for screen in &result.screens {
         out.push_str(&format!(
-            "- screen: {} primary={} image={}x{} native={}x{} origin={},{} coords=x:0..1000,y:0..1000 screenshot={} metadata={}\n",
+            "- screen: {} primary={} image={}x{} logical={}x{} native={}x{} origin={},{} coords=x:0..1000,y:0..1000 screenshot={} metadata={}\n",
             screen.screen.screen_id,
             screen.screen.is_primary,
             screen.image_width,
             screen.image_height,
+            screen.screen.logical_width,
+            screen.screen.logical_height,
             screen.screen.native_width,
             screen.screen.native_height,
             screen.screen.origin_x,
@@ -1006,14 +1044,14 @@ pub fn render_action_result(result: &ActResult) -> String {
             screen.metadata_path.display()
         ));
         out.push_str(&format!(
-            "- map: {} image_x=round(x/1000*{}) image_y=round(y/1000*{}) native_x={}+round(x/1000*{}) native_y={}+round(y/1000*{})\n",
+            "- map: {} image_x=round(x/1000*{}) image_y=round(y/1000*{}) desktop_x={}+round(x/1000*{}) desktop_y={}+round(y/1000*{})\n",
             screen.screen.screen_id,
             screen.image_width.saturating_sub(1),
             screen.image_height.saturating_sub(1),
             screen.screen.origin_x,
-            screen.screen.native_width,
+            screen.screen.logical_width,
             screen.screen.origin_y,
-            screen.screen.native_height
+            screen.screen.logical_height
         ));
     }
     out
@@ -1049,17 +1087,21 @@ pub fn render_doctor(report: &DoctorReport) -> String {
     out.push_str(&format!("- screens: {}\n", report.screens.len()));
     for screen in &report.screens {
         out.push_str(&format!(
-            "- screen: {} primary={} origin={},{} native={}x{} scale={}\n",
+            "- screen: {} fingerprint={} primary={} origin={},{} logical={}x{} native={}x{} scale={}\n",
             screen.screen_id,
+            screen.display_fingerprint,
             screen.is_primary,
             screen.origin_x,
             screen.origin_y,
+            screen.logical_width,
+            screen.logical_height,
             screen.native_width,
             screen.native_height,
             screen.scale_factor
         ));
     }
     out.push_str(&format!("- ffmpeg: {}\n", report.ffmpeg));
+    out.push_str(&format!("- recording: {}\n", report.recording));
     out
 }
 
@@ -1133,13 +1175,13 @@ pub fn parse_action_block(markdown: &str) -> Result<AgentAction> {
 }
 
 fn validate_wait_after(wait_after_ms: Option<u64>) -> Result<()> {
-    if let Some(wait_after_ms) = wait_after_ms {
-        if wait_after_ms > 30_000 {
-            return Err(FerrisError::new(
-                ErrorKind::Protocol,
-                "wait_after_ms exceeds 30000 ms",
-            ));
-        }
+    if let Some(wait_after_ms) = wait_after_ms
+        && wait_after_ms > 30_000
+    {
+        return Err(FerrisError::new(
+            ErrorKind::Protocol,
+            "wait_after_ms exceeds 30000 ms",
+        ));
     }
     Ok(())
 }
@@ -1194,7 +1236,10 @@ fn parse_action_kind(fields: &BTreeMap<String, String>) -> Result<ActionKind> {
             delta_y: parse_i32_required(fields, "delta_y")?,
         }),
         "type" => Ok(ActionKind::Type {
-            text: required(fields, "text")?,
+            text: match fields.get("text") {
+                Some(text) => text.clone(),
+                None => decode_hex(&required(fields, "text_hex")?)?,
+            },
         }),
         "press_key" => Ok(ActionKind::PressKey {
             key: required(fields, "key")?,
@@ -1217,7 +1262,7 @@ fn parse_action_kind(fields: &BTreeMap<String, String>) -> Result<ActionKind> {
     }
 }
 
-fn validate_policy(action: &ActionKind) -> Result<()> {
+pub fn validate_policy(action: &ActionKind) -> Result<()> {
     match action {
         ActionKind::Click { x, y, .. }
         | ActionKind::DoubleClick { x, y, .. }
@@ -1339,10 +1384,10 @@ fn resolve_action_screen<'a>(
 }
 
 fn resolve_primary_alias(id: &str, screens: &[ScreenInfo]) -> String {
-    if id == "primary" {
-        if let Some(primary) = screens.iter().find(|screen| screen.is_primary) {
-            return primary.screen_id.clone();
-        }
+    if id == "primary"
+        && let Some(primary) = screens.iter().find(|screen| screen.is_primary)
+    {
+        return primary.screen_id.clone();
     }
     id.to_string()
 }
@@ -1449,19 +1494,64 @@ fn to_native_action(action: &ActionKind, screen: Option<&ScreenInfo>) -> Result<
 
 pub fn map_point(agent_x: i32, agent_y: i32, screen: &ScreenInfo) -> Result<(i32, i32)> {
     validate_agent_point(agent_x, agent_y)?;
-    let native_x =
-        screen.origin_x + ((agent_x as f64 / 1000.0) * screen.native_width as f64).round() as i32;
-    let native_y =
-        screen.origin_y + ((agent_y as f64 / 1000.0) * screen.native_height as f64).round() as i32;
-    let max_x = screen.origin_x + screen.native_width.saturating_sub(1) as i32;
-    let max_y = screen.origin_y + screen.native_height.saturating_sub(1) as i32;
+    let desktop_x =
+        screen.origin_x + ((agent_x as f64 / 1000.0) * screen.logical_width as f64).round() as i32;
+    let desktop_y =
+        screen.origin_y + ((agent_y as f64 / 1000.0) * screen.logical_height as f64).round() as i32;
+    let max_x = screen.origin_x + screen.logical_width.saturating_sub(1) as i32;
+    let max_y = screen.origin_y + screen.logical_height.saturating_sub(1) as i32;
     Ok((
-        native_x.clamp(screen.origin_x, max_x),
-        native_y.clamp(screen.origin_y, max_y),
+        desktop_x.clamp(screen.origin_x, max_x),
+        desktop_y.clamp(screen.origin_y, max_y),
     ))
 }
 
-fn action_summary(action: &ActionKind) -> String {
+pub fn map_desktop_point(x: i32, y: i32, screen: &ScreenInfo) -> Result<(i32, i32)> {
+    let max_x = screen.origin_x + screen.logical_width.saturating_sub(1) as i32;
+    let max_y = screen.origin_y + screen.logical_height.saturating_sub(1) as i32;
+    if x < screen.origin_x || x > max_x || y < screen.origin_y || y > max_y {
+        return Err(FerrisError::new(
+            ErrorKind::Coordinate,
+            format!(
+                "desktop point {x},{y} is outside screen {} bounds {},{} {}x{}",
+                screen.screen_id,
+                screen.origin_x,
+                screen.origin_y,
+                screen.logical_width,
+                screen.logical_height
+            ),
+        ));
+    }
+    let local_x = x - screen.origin_x;
+    let local_y = y - screen.origin_y;
+    Ok((
+        ((local_x as f64 / screen.logical_width.max(1) as f64) * 1000.0)
+            .round()
+            .clamp(0.0, 1000.0) as i32,
+        ((local_y as f64 / screen.logical_height.max(1) as f64) * 1000.0)
+            .round()
+            .clamp(0.0, 1000.0) as i32,
+    ))
+}
+
+pub fn screen_for_desktop_point(x: i32, y: i32, screens: &[ScreenInfo]) -> Result<&ScreenInfo> {
+    screens
+        .iter()
+        .find(|screen| {
+            x >= screen.origin_x
+                && y >= screen.origin_y
+                && x < screen.origin_x + screen.logical_width as i32
+                && y < screen.origin_y + screen.logical_height as i32
+        })
+        .ok_or_else(|| {
+            FerrisError::new(
+                ErrorKind::Coordinate,
+                format!("desktop point {x},{y} is not on an active screen"),
+            )
+        })
+}
+
+pub fn action_summary(action: &ActionKind) -> String {
     match action {
         ActionKind::Click {
             screen_id,
@@ -1536,6 +1626,177 @@ fn action_summary(action: &ActionKind) -> String {
         ActionKind::Hotkey { keys } => format!("hotkey keys={}", keys.join("+")),
         ActionKind::Wait { duration_ms } => format!("wait duration_ms={duration_ms}"),
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct PreparedAction {
+    pub action: ActionKind,
+    pub native: NativeAction,
+    pub target_screen_id: Option<String>,
+}
+
+pub fn prepare_action(
+    action: &AgentAction,
+    screens: &[ScreenInfo],
+    default_screen_id: Option<&str>,
+) -> Result<PreparedAction> {
+    if action.status != ActionStatus::Action {
+        return Err(FerrisError::new(
+            ErrorKind::Protocol,
+            "sequence steps must contain status action",
+        ));
+    }
+    let kind = action.kind.clone().ok_or_else(|| {
+        FerrisError::new(
+            ErrorKind::Protocol,
+            "status action requires an action field",
+        )
+    })?;
+    validate_policy(&kind)?;
+    let requested_screen_id = kind
+        .screen_id()
+        .or(default_screen_id)
+        .filter(|_| kind.accepts_screen_id());
+    let resolved_screen = if kind.requires_screen_id() || requested_screen_id.is_some() {
+        resolve_action_screen(requested_screen_id, screens)?
+    } else {
+        None
+    };
+    let target_screen_id = resolved_screen.map(|screen| screen.screen_id.clone());
+    let resolved = kind.with_screen_id(target_screen_id.clone());
+    let native = to_native_action(&resolved, resolved_screen)?;
+    Ok(PreparedAction {
+        action: resolved,
+        native,
+        target_screen_id,
+    })
+}
+
+pub fn render_action_block(action: &ActionKind, wait_after_ms: Option<u64>) -> String {
+    let mut out = String::from("status: action\n");
+    match action {
+        ActionKind::Click {
+            screen_id,
+            x,
+            y,
+            button,
+        } => {
+            out.push_str("action: click\n");
+            push_screen_id(&mut out, screen_id);
+            out.push_str(&format!("x: {x}\ny: {y}\nbutton: {}\n", button.as_str()));
+        }
+        ActionKind::DoubleClick {
+            screen_id,
+            x,
+            y,
+            button,
+        } => {
+            out.push_str("action: double_click\n");
+            push_screen_id(&mut out, screen_id);
+            out.push_str(&format!("x: {x}\ny: {y}\nbutton: {}\n", button.as_str()));
+        }
+        ActionKind::RightClick { screen_id, x, y } => {
+            out.push_str("action: right_click\n");
+            push_screen_id(&mut out, screen_id);
+            out.push_str(&format!("x: {x}\ny: {y}\n"));
+        }
+        ActionKind::MoveMouse { screen_id, x, y } => {
+            out.push_str("action: move_mouse\n");
+            push_screen_id(&mut out, screen_id);
+            out.push_str(&format!("x: {x}\ny: {y}\n"));
+        }
+        ActionKind::Drag {
+            screen_id,
+            from_x,
+            from_y,
+            to_x,
+            to_y,
+            duration_ms,
+            button,
+        } => {
+            out.push_str("action: drag\n");
+            push_screen_id(&mut out, screen_id);
+            out.push_str(&format!(
+                "from_x: {from_x}\nfrom_y: {from_y}\nto_x: {to_x}\nto_y: {to_y}\nduration_ms: {duration_ms}\nbutton: {}\n",
+                button.as_str()
+            ));
+        }
+        ActionKind::Scroll {
+            screen_id,
+            x,
+            y,
+            delta_x,
+            delta_y,
+        } => {
+            out.push_str("action: scroll\n");
+            push_screen_id(&mut out, screen_id);
+            if let (Some(x), Some(y)) = (x, y) {
+                out.push_str(&format!("x: {x}\ny: {y}\n"));
+            }
+            out.push_str(&format!("delta_x: {delta_x}\ndelta_y: {delta_y}\n"));
+        }
+        ActionKind::Type { text } => {
+            out.push_str("action: type\n");
+            if !text.is_empty() && text.trim() == text && !text.contains(['\n', '\r']) {
+                out.push_str(&format!("text: {text}\n"));
+            } else {
+                out.push_str(&format!("text_hex: {}\n", encode_hex(text)));
+            }
+        }
+        ActionKind::PressKey { key } => {
+            out.push_str(&format!("action: press_key\nkey: {key}\n"));
+        }
+        ActionKind::Hotkey { keys } => {
+            out.push_str(&format!("action: hotkey\nkeys: {}\n", keys.join("+")));
+        }
+        ActionKind::Wait { duration_ms } => {
+            out.push_str(&format!("action: wait\nduration_ms: {duration_ms}\n"));
+        }
+    }
+    if let Some(wait_after_ms) = wait_after_ms.filter(|value| *value > 0) {
+        out.push_str(&format!("wait_after_ms: {wait_after_ms}\n"));
+    }
+    out
+}
+
+fn push_screen_id(out: &mut String, screen_id: &Option<String>) {
+    if let Some(screen_id) = screen_id {
+        out.push_str(&format!("screen_id: {screen_id}\n"));
+    }
+}
+
+fn encode_hex(value: &str) -> String {
+    value
+        .as_bytes()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+fn decode_hex(value: &str) -> Result<String> {
+    if !value.len().is_multiple_of(2) {
+        return Err(FerrisError::new(
+            ErrorKind::Protocol,
+            "text_hex must contain an even number of hexadecimal characters",
+        ));
+    }
+    let mut bytes = Vec::with_capacity(value.len() / 2);
+    for pair in value.as_bytes().chunks_exact(2) {
+        let pair = std::str::from_utf8(pair).map_err(|_| {
+            FerrisError::new(
+                ErrorKind::Protocol,
+                "text_hex must be valid ASCII hexadecimal",
+            )
+        })?;
+        bytes.push(u8::from_str_radix(pair, 16).map_err(|_| {
+            FerrisError::new(
+                ErrorKind::Protocol,
+                "text_hex contains a non-hexadecimal value",
+            )
+        })?);
+    }
+    String::from_utf8(bytes)
+        .map_err(|_| FerrisError::new(ErrorKind::Protocol, "text_hex does not encode valid UTF-8"))
 }
 
 fn action_summary_with_wait_after(action: &ActionKind, wait_after_ms: u64) -> String {
@@ -1624,10 +1885,13 @@ mod tests {
                 screen(),
                 ScreenInfo {
                     screen_id: "screen-2".to_string(),
+                    display_fingerprint: "test-2".to_string(),
                     name: "Test 2".to_string(),
                     is_primary: false,
-                    origin_x: 3024,
+                    origin_x: 1512,
                     origin_y: 0,
+                    logical_width: 2560,
+                    logical_height: 1440,
                     native_width: 2560,
                     native_height: 1440,
                     scale_factor: 1.0,
@@ -1692,10 +1956,13 @@ mod tests {
     fn screen() -> ScreenInfo {
         ScreenInfo {
             screen_id: "screen-1".to_string(),
+            display_fingerprint: "test-1".to_string(),
             name: "Test".to_string(),
             is_primary: true,
             origin_x: 0,
             origin_y: 0,
+            logical_width: 1512,
+            logical_height: 982,
             native_width: 3024,
             native_height: 1964,
             scale_factor: 2.0,
@@ -1735,8 +2002,32 @@ mod tests {
     }
 
     #[test]
-    fn maps_normalized_center_to_native_center() {
-        assert_eq!(map_point(500, 500, &screen()).unwrap(), (1512, 982));
+    fn maps_normalized_center_to_logical_desktop_center() {
+        assert_eq!(map_point(500, 500, &screen()).unwrap(), (756, 491));
+    }
+
+    #[test]
+    fn desktop_and_normalized_coordinates_round_trip_on_retina_screen() {
+        let screen = screen();
+        let desktop = map_point(742, 611, &screen).unwrap();
+        let normalized = map_desktop_point(desktop.0, desktop.1, &screen).unwrap();
+        assert!((normalized.0 - 742).abs() <= 1);
+        assert!((normalized.1 - 611).abs() <= 1);
+    }
+
+    #[test]
+    fn resolves_points_on_negative_origin_screen() {
+        let mut left = screen();
+        left.screen_id = "screen-left".to_string();
+        left.origin_x = -1512;
+        let primary = screen();
+        assert_eq!(
+            screen_for_desktop_point(-1, 400, &[left.clone(), primary])
+                .unwrap()
+                .screen_id,
+            "screen-left"
+        );
+        assert!(map_desktop_point(0, 400, &left).is_err());
     }
 
     #[test]
@@ -1753,6 +2044,17 @@ mod tests {
         assert_eq!(action.status, ActionStatus::Action);
         assert!(matches!(action.kind, Some(ActionKind::Click { .. })));
         assert_eq!(action.wait_after_ms, None);
+    }
+
+    #[test]
+    fn action_block_round_trips_text_with_significant_whitespace() {
+        let expected = ActionKind::Type {
+            text: " leading and trailing \n".to_string(),
+        };
+        let rendered = render_action_block(&expected, None);
+        assert!(rendered.contains("text_hex:"));
+        let parsed = parse_action_block(&rendered).unwrap();
+        assert_eq!(parsed.kind, Some(expected));
     }
 
     #[test]

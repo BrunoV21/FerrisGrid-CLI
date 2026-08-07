@@ -879,15 +879,15 @@ fn run_hotkey(keys: &[String]) -> Result<()> {
             _ => None,
         })
         .collect();
+    let command = match key_code(last) {
+        Ok(code) => format!("key code {code}"),
+        Err(_) => format!("keystroke \"{}\"", escape_applescript(last)),
+    };
     let script = if modifiers.is_empty() {
-        format!(
-            "tell application \"System Events\" to keystroke \"{}\"",
-            escape_applescript(last)
-        )
+        format!("tell application \"System Events\" to {command}")
     } else {
         format!(
-            "tell application \"System Events\" to keystroke \"{}\" using {{{}}}",
-            escape_applescript(last),
+            "tell application \"System Events\" to {command} using {{{}}}",
             modifiers.join(", ")
         )
     };
@@ -901,7 +901,28 @@ fn key_code(key: &str) -> Result<u16> {
         "tab" => Ok(48),
         "escape" | "esc" => Ok(53),
         "space" => Ok(49),
-        "delete" | "backspace" => Ok(51),
+        "backspace" => Ok(51),
+        "delete" | "del" => Ok(117),
+        "left" | "arrowleft" => Ok(123),
+        "right" | "arrowright" => Ok(124),
+        "down" | "arrowdown" => Ok(125),
+        "up" | "arrowup" => Ok(126),
+        "home" => Ok(115),
+        "end" => Ok(119),
+        "pageup" => Ok(116),
+        "pagedown" => Ok(121),
+        "f1" => Ok(122),
+        "f2" => Ok(120),
+        "f3" => Ok(99),
+        "f4" => Ok(118),
+        "f5" => Ok(96),
+        "f6" => Ok(97),
+        "f7" => Ok(98),
+        "f8" => Ok(100),
+        "f9" => Ok(101),
+        "f10" => Ok(109),
+        "f11" => Ok(103),
+        "f12" => Ok(111),
         other => Err(FerrisError::new(
             ErrorKind::Protocol,
             format!("unsupported key for native macOS backend: {other}"),
