@@ -15,4 +15,5 @@ path = "src/main.rs"
 ferrisgrid-core = { path = "../ferrisgrid-core", version = "0.3.0" }
 ferrisgrid-capture = { path = "../ferrisgrid-capture", version = "0.3.0" }
 ferrisgrid-input = { path = "../ferrisgrid-input", version = "0.3.0" }
+ferrisgrid-record = { path = "../ferrisgrid-record", version = "0.3.0" }
 ferrisgrid-export = { path = "../ferrisgrid-export", version = "0.3.0" }

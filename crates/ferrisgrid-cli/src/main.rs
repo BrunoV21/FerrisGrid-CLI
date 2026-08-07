@@ -5,11 +5,17 @@ use ferrisgrid_core::{
 };
 use ferrisgrid_export::{RecapOptions, VideoFormat, recap_with_options, render_recap};
 use ferrisgrid_input::backend_by_name as input_backend;
+use ferrisgrid_record::{
+    FakeEventSource, RecordRequest, ReplayRequest, TextMode, native_event_source, record,
+    recording_permission_report, render_record_result, render_replay_result, replay,
+};
+use std::collections::BTreeMap;
 use std::env;
 use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process;
+use std::sync::Arc;
 
 const FAST_IMAGE_EDGE: u32 = 800;
 const BALANCED_MIN_LONG_EDGE: u32 = 800;
@@ -73,6 +79,16 @@ fn run() -> ferrisgrid_core::Result<()> {
             Ok(())
         }
         "recap" => command_recap(args),
+        "record" if is_help_request(&args) => {
+            print_help(HelpTopic::Record);
+            Ok(())
+        }
+        "record" => command_record(args),
+        "replay" if is_help_request(&args) => {
+            print_help(HelpTopic::Replay);
+            Ok(())
+        }
+        "replay" => command_replay(args),
         "clear" if is_help_request(&args) => {
             print_help(HelpTopic::Clear);
             Ok(())
@@ -100,6 +116,8 @@ enum HelpTopic {
     Act,
     Doctor,
     Recap,
+    Record,
+    Replay,
     Clear,
 }
 
@@ -114,6 +132,8 @@ fn parse_help_topic(value: &str) -> ferrisgrid_core::Result<HelpTopic> {
         "act" => Ok(HelpTopic::Act),
         "doctor" => Ok(HelpTopic::Doctor),
         "recap" => Ok(HelpTopic::Recap),
+        "record" => Ok(HelpTopic::Record),
+        "replay" => Ok(HelpTopic::Replay),
         "clear" => Ok(HelpTopic::Clear),
         "-h" | "--help" | "help" => Ok(HelpTopic::Root),
         other => Err(ferrisgrid_core::FerrisError::new(
@@ -193,6 +213,19 @@ fn command_doctor(args: Vec<String>) -> ferrisgrid_core::Result<()> {
         ),
     };
     let capabilities = input.capabilities();
+    let recording = if options.backend == "fake" {
+        "ready backend=fake".to_string()
+    } else {
+        let report = recording_permission_report();
+        format!(
+            "supported={} screen_capture={} input_observation={} accessibility={} detail={}",
+            report.supported,
+            report.screen_capture,
+            report.input_observation,
+            report.accessibility,
+            report.detail
+        )
+    };
     let report = DoctorReport {
         os: env::consts::OS.to_string(),
         capture: capture_status,
@@ -209,6 +242,7 @@ fn command_doctor(args: Vec<String>) -> ferrisgrid_core::Result<()> {
         } else {
             "not_found".to_string()
         },
+        recording,
     };
     print!("{}", render_doctor(&report));
     Ok(())
@@ -225,6 +259,83 @@ fn command_recap(args: Vec<String>) -> ferrisgrid_core::Result<()> {
     let options = RecapCommandOptions::parse(&args[1..])?;
     let result = recap_with_options(&session_path, options.into_recap_options())?;
     print!("{}", render_recap(&result));
+    Ok(())
+}
+
+fn command_record(args: Vec<String>) -> ferrisgrid_core::Result<()> {
+    let options = RecordCommandOptions::parse(&args)?;
+    if options.backend != "fake" {
+        let report = recording_permission_report();
+        if !report.supported {
+            return Err(ferrisgrid_core::FerrisError::new(
+                ferrisgrid_core::ErrorKind::Platform,
+                report.detail,
+            ));
+        }
+        if !report.screen_capture || !report.input_observation || !report.accessibility {
+            return Err(ferrisgrid_core::FerrisError::new(
+                ferrisgrid_core::ErrorKind::Permission,
+                report.detail,
+            ));
+        }
+    }
+    let capture: Arc<dyn ferrisgrid_core::CaptureBackend> =
+        Arc::from(capture_backend(&options.backend));
+    let event_source: Box<dyn ferrisgrid_record::EventSource> = if options.backend == "fake" {
+        Box::new(FakeEventSource::demonstration())
+    } else {
+        native_event_source()
+    };
+    eprintln!(
+        "FerrisGrid recording starts in {} seconds. Stop: Control+Option+Command+Escape. Pause: Control+Option+Command+P.",
+        options.countdown_ms / 1000
+    );
+    if options.text_mode != TextMode::Plain {
+        eprintln!(
+            "Typed payloads are {}; screenshots may still visibly contain sensitive text.",
+            options.text_mode.as_str()
+        );
+    }
+    let result = record(
+        RecordRequest {
+            output_dir: options.output_dir,
+            session: options.session,
+            text_mode: options.text_mode,
+            format: options.format,
+            image_size_limit: options.image_size_limit,
+            fps: options.fps,
+            settle_ms: options.settle_ms,
+            countdown_ms: options.countdown_ms,
+        },
+        capture,
+        event_source,
+    )?;
+    print!("{}", render_record_result(&result));
+    Ok(())
+}
+
+fn command_replay(args: Vec<String>) -> ferrisgrid_core::Result<()> {
+    let options = ReplayCommandOptions::parse(&args)?;
+    let capture: Arc<dyn ferrisgrid_core::CaptureBackend> =
+        Arc::from(capture_backend(&options.backend));
+    let input: Arc<dyn ferrisgrid_core::InputBackend> = Arc::from(input_backend(&options.backend));
+    let result = replay(
+        ReplayRequest {
+            source: options.source,
+            output_dir: options.output_dir,
+            session: options.session,
+            execute: options.execute,
+            delay_ms: options.delay_ms,
+            max_actions: options.max_actions,
+            screen_map: options.screen_map,
+            format: options.format,
+            grid_overlay: options.grid_overlay,
+            image_size_limit: options.image_size_limit,
+        },
+        capture,
+        input,
+    )?;
+    print!("{}", render_replay_result(&result));
     Ok(())
 }
 
@@ -381,6 +492,210 @@ impl RecapCommandOptions {
 }
 
 #[derive(Debug)]
+struct RecordCommandOptions {
+    output_dir: PathBuf,
+    session: Option<String>,
+    text_mode: TextMode,
+    format: ImageFormat,
+    image_size_limit: ImageSizeLimit,
+    backend: String,
+    fps: u32,
+    settle_ms: u64,
+    countdown_ms: u64,
+}
+
+impl RecordCommandOptions {
+    fn parse(args: &[String]) -> ferrisgrid_core::Result<Self> {
+        let mut options = Self {
+            output_dir: default_output_dir(),
+            session: None,
+            text_mode: TextMode::Redacted,
+            format: ImageFormat::Jpg,
+            image_size_limit: default_image_size_limit()?,
+            backend: default_backend(),
+            fps: 4,
+            settle_ms: 300,
+            countdown_ms: 3_000,
+        };
+        let mut index = 0;
+        while index < args.len() {
+            match args[index].as_str() {
+                "--output-dir" => {
+                    index += 1;
+                    options.output_dir = PathBuf::from(value(args, index, "--output-dir")?);
+                }
+                "--session" => {
+                    index += 1;
+                    options.session = Some(value(args, index, "--session")?.to_string());
+                }
+                "--text-mode" => {
+                    index += 1;
+                    options.text_mode = TextMode::parse(value(args, index, "--text-mode")?)?;
+                }
+                "--format" => {
+                    index += 1;
+                    options.format = value(args, index, "--format")?.parse()?;
+                }
+                "--resolution" => {
+                    index += 1;
+                    options.image_size_limit =
+                        parse_resolution(value(args, index, "--resolution")?, "--resolution")?;
+                }
+                "--max-image-edge" => {
+                    index += 1;
+                    options.image_size_limit =
+                        parse_max_image_edge(value(args, index, "--max-image-edge")?)?;
+                }
+                "--no-downsample" => options.image_size_limit = ImageSizeLimit::Native,
+                "--backend" => {
+                    index += 1;
+                    options.backend = value(args, index, "--backend")?.to_string();
+                }
+                "--fps" => {
+                    index += 1;
+                    options.fps = parse_u32_flag(value(args, index, "--fps")?, "--fps")?;
+                }
+                "--settle-ms" => {
+                    index += 1;
+                    options.settle_ms =
+                        parse_u64_flag(value(args, index, "--settle-ms")?, "--settle-ms")?;
+                }
+                "--countdown-ms" => {
+                    index += 1;
+                    options.countdown_ms =
+                        parse_u64_flag(value(args, index, "--countdown-ms")?, "--countdown-ms")?;
+                }
+                other => {
+                    return Err(ferrisgrid_core::FerrisError::new(
+                        ferrisgrid_core::ErrorKind::Protocol,
+                        format!("unknown record flag: {other}"),
+                    ));
+                }
+            }
+            index += 1;
+        }
+        Ok(options)
+    }
+}
+
+#[derive(Debug)]
+struct ReplayCommandOptions {
+    source: PathBuf,
+    output_dir: PathBuf,
+    session: Option<String>,
+    execute: bool,
+    delay_ms: u64,
+    max_actions: usize,
+    screen_map: BTreeMap<String, String>,
+    format: ImageFormat,
+    grid_overlay: bool,
+    image_size_limit: ImageSizeLimit,
+    backend: String,
+}
+
+impl ReplayCommandOptions {
+    fn parse(args: &[String]) -> ferrisgrid_core::Result<Self> {
+        let source = args
+            .first()
+            .filter(|value| !value.starts_with('-'))
+            .ok_or_else(|| {
+                ferrisgrid_core::FerrisError::new(
+                    ferrisgrid_core::ErrorKind::Protocol,
+                    "replay requires a session directory or sequence.md path",
+                )
+            })?;
+        let mut options = Self {
+            source: PathBuf::from(source),
+            output_dir: default_output_dir(),
+            session: None,
+            execute: false,
+            delay_ms: 300,
+            max_actions: 25,
+            screen_map: BTreeMap::new(),
+            format: ImageFormat::Jpg,
+            grid_overlay: false,
+            image_size_limit: default_image_size_limit()?,
+            backend: default_backend(),
+        };
+        let mut index = 1;
+        while index < args.len() {
+            match args[index].as_str() {
+                "--execute" => options.execute = true,
+                "--output-dir" => {
+                    index += 1;
+                    options.output_dir = PathBuf::from(value(args, index, "--output-dir")?);
+                }
+                "--session" => {
+                    index += 1;
+                    options.session = Some(value(args, index, "--session")?.to_string());
+                }
+                "--delay-ms" => {
+                    index += 1;
+                    options.delay_ms =
+                        parse_u64_flag(value(args, index, "--delay-ms")?, "--delay-ms")?;
+                }
+                "--max-actions" => {
+                    index += 1;
+                    options.max_actions =
+                        parse_u32_flag(value(args, index, "--max-actions")?, "--max-actions")?
+                            as usize;
+                }
+                "--map-screen" => {
+                    index += 1;
+                    let mapping = value(args, index, "--map-screen")?;
+                    let (recorded, current) = mapping.split_once('=').ok_or_else(|| {
+                        ferrisgrid_core::FerrisError::new(
+                            ferrisgrid_core::ErrorKind::Protocol,
+                            "--map-screen must use recorded=current",
+                        )
+                    })?;
+                    if recorded.is_empty() || current.is_empty() {
+                        return Err(ferrisgrid_core::FerrisError::new(
+                            ferrisgrid_core::ErrorKind::Protocol,
+                            "--map-screen must use non-empty recorded=current screen IDs",
+                        ));
+                    }
+                    options
+                        .screen_map
+                        .insert(recorded.to_string(), current.to_string());
+                }
+                "--backend" => {
+                    index += 1;
+                    options.backend = value(args, index, "--backend")?.to_string();
+                }
+                "--format" => {
+                    index += 1;
+                    options.format = value(args, index, "--format")?.parse()?;
+                }
+                "--grid-overlay" => {
+                    index += 1;
+                    options.grid_overlay = parse_bool(value(args, index, "--grid-overlay")?)?;
+                }
+                "--resolution" => {
+                    index += 1;
+                    options.image_size_limit =
+                        parse_resolution(value(args, index, "--resolution")?, "--resolution")?;
+                }
+                "--max-image-edge" => {
+                    index += 1;
+                    options.image_size_limit =
+                        parse_max_image_edge(value(args, index, "--max-image-edge")?)?;
+                }
+                "--no-downsample" => options.image_size_limit = ImageSizeLimit::Native,
+                other => {
+                    return Err(ferrisgrid_core::FerrisError::new(
+                        ferrisgrid_core::ErrorKind::Protocol,
+                        format!("unknown replay flag: {other}"),
+                    ));
+                }
+            }
+            index += 1;
+        }
+        Ok(options)
+    }
+}
+
+#[derive(Debug)]
 struct Options {
     output_dir: PathBuf,
     session: Option<String>,
@@ -477,6 +792,41 @@ fn value<'a>(args: &'a [String], index: usize, flag: &str) -> ferrisgrid_core::R
         ferrisgrid_core::FerrisError::new(
             ferrisgrid_core::ErrorKind::Protocol,
             format!("{flag} requires a value"),
+        )
+    })
+}
+
+fn default_output_dir() -> PathBuf {
+    env::var("FERRISGRID_OUTPUT_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from(".ferrisgrid"))
+}
+
+fn default_backend() -> String {
+    env::var("FERRISGRID_BACKEND").unwrap_or_else(|_| "native".to_string())
+}
+
+fn default_image_size_limit() -> ferrisgrid_core::Result<ImageSizeLimit> {
+    match env::var("FERRISGRID_MAX_IMAGE_EDGE") {
+        Ok(value) => parse_max_image_edge(&value),
+        Err(_) => Ok(balanced_image_size_limit()),
+    }
+}
+
+fn parse_u32_flag(value: &str, flag: &str) -> ferrisgrid_core::Result<u32> {
+    value.parse::<u32>().map_err(|_| {
+        ferrisgrid_core::FerrisError::new(
+            ferrisgrid_core::ErrorKind::Protocol,
+            format!("{flag} must be a positive integer"),
+        )
+    })
+}
+
+fn parse_u64_flag(value: &str, flag: &str) -> ferrisgrid_core::Result<u64> {
+    value.parse::<u64>().map_err(|_| {
+        ferrisgrid_core::FerrisError::new(
+            ferrisgrid_core::ErrorKind::Protocol,
+            format!("{flag} must be a non-negative integer"),
         )
     })
 }
@@ -590,6 +940,8 @@ fn help_text(topic: HelpTopic) -> &'static str {
         HelpTopic::Act => ACT_HELP,
         HelpTopic::Doctor => DOCTOR_HELP,
         HelpTopic::Recap => RECAP_HELP,
+        HelpTopic::Record => RECORD_HELP,
+        HelpTopic::Replay => REPLAY_HELP,
         HelpTopic::Clear => CLEAR_HELP,
     }
 }
@@ -623,14 +975,18 @@ const ROOT_HELP: &str = concat!(
     "  ferrisgrid act [options] [--file action.md]\n",
     "  ferrisgrid doctor [options]\n",
     "  ferrisgrid recap <session_path> [options]\n",
+    "  ferrisgrid record [options]\n",
+    "  ferrisgrid replay <session-or-sequence> [options]\n",
     "  ferrisgrid clear [options]\n",
-    "  ferrisgrid help [observe|act|doctor|recap|clear]\n",
+    "  ferrisgrid help [observe|act|doctor|recap|record|replay|clear]\n",
     "\n",
     "Command help:\n",
     "  ferrisgrid observe --help\n",
     "  ferrisgrid act --help\n",
     "  ferrisgrid doctor --help\n",
     "  ferrisgrid recap --help\n",
+    "  ferrisgrid record --help\n",
+    "  ferrisgrid replay --help\n",
     "  ferrisgrid clear --help\n",
     "\n",
     "Common output/capture options:\n",
@@ -678,6 +1034,8 @@ const ROOT_HELP: &str = concat!(
     "  ferrisgrid observe --grid-overlay false --resolution detail\n",
     "  ferrisgrid act --file .ferrisgrid/action.md --grid-overlay false\n",
     "  ferrisgrid recap .ferrisgrid/sessions/<session_id> --video mp4\n",
+    "  ferrisgrid record --session demo --text-mode redacted\n",
+    "  ferrisgrid replay .ferrisgrid/sessions/demo\n",
 );
 
 const OBSERVE_HELP: &str = concat!(
@@ -825,7 +1183,7 @@ const ACT_HELP: &str = concat!(
 const DOCTOR_HELP: &str = concat!(
     "FerrisGrid doctor\n",
     "\n",
-    "Check capture, input, screen discovery, output directory, and ffmpeg availability.\n",
+    "Check capture, input, recording readiness, screen discovery, output directory, and ffmpeg availability.\n",
     "\n",
     "Docs: ",
     command_docs_url!(),
@@ -866,6 +1224,74 @@ const RECAP_HELP: &str = concat!(
     "\n",
     "Example:\n",
     "  ferrisgrid recap .ferrisgrid/sessions/<session_id> --video mp4 --framerate 2\n",
+);
+
+const RECORD_HELP: &str = concat!(
+    "FerrisGrid record\n",
+    "\n",
+    "Record a human macOS demonstration as semantic FerrisGrid actions and smart visual checkpoints.\n",
+    "\n",
+    "Docs: ",
+    command_docs_url!(),
+    "/record.md\n",
+    "\n",
+    "Usage:\n",
+    "  ferrisgrid record [options]\n",
+    "\n",
+    "Options:\n",
+    "  --output-dir <path>            Trace root. Default: .ferrisgrid\n",
+    "  --session <name-or-path>       Create a named recording session.\n",
+    "  --text-mode <mode>             redacted (default), plain, or off.\n",
+    "  --fps <fps>                    Rolling checkpoint frame rate. Default: 4. Max: 30.\n",
+    "  --settle-ms <ms>               Post-action capture delay. Default: 300.\n",
+    "  --countdown-ms <ms>            Delay before input observation. Default: 3000.\n",
+    "  --backend <name>               native-macos/native or fake.\n",
+    "  --format <jpg|png>             Stored checkpoint format. Default: jpg.\n",
+    "  --resolution <preset|pixels>   fast, balanced, detail, native, or max edge pixels.\n",
+    "  --max-image-edge <pixels|native>\n",
+    "  --no-downsample                Keep native screenshot dimensions.\n",
+    "  -h, --help                     Show this help.\n",
+    "\n",
+    "Controls:\n",
+    "  Control+Option+Command+Escape  Stop and finalize.\n",
+    "  Control+Option+Command+P       Pause or resume input and screen capture.\n",
+    "  Ctrl+C                         Stop from the launching terminal.\n",
+    "\n",
+    "Privacy:\n",
+    "  Redacting typed payloads does not redact text visible in screenshots.\n",
+    "  Use --text-mode plain only when storing replayable typed content is intended.\n",
+);
+
+const REPLAY_HELP: &str = concat!(
+    "FerrisGrid replay\n",
+    "\n",
+    "Validate a recorded sequence, or explicitly reproduce it through policy-gated OS input.\n",
+    "\n",
+    "Docs: ",
+    command_docs_url!(),
+    "/replay.md\n",
+    "\n",
+    "Usage:\n",
+    "  ferrisgrid replay <session-or-sequence.md> [options]\n",
+    "\n",
+    "Options:\n",
+    "  --execute                      Emit OS input. Without it, replay is read-only dry-run.\n",
+    "  --delay-ms <ms>                Fixed delay between actions. Default: 300.\n",
+    "  --max-actions <count>          Preflight action limit. Default: 25. Max: 1000.\n",
+    "  --map-screen <old=new>         Map a recorded screen ID to a current screen ID. Repeatable.\n",
+    "  --output-dir <path>            Replay trace root. Default: .ferrisgrid\n",
+    "  --session <name-or-path>       Name the new live replay session.\n",
+    "  --backend <name>               Input/capture backend.\n",
+    "  --format <jpg|png>             Live replay checkpoint format. Default: jpg.\n",
+    "  --grid-overlay <true|false>    Overlay replay screenshots. Default: false.\n",
+    "  --resolution <preset|pixels>   fast, balanced, detail, native, or max edge pixels.\n",
+    "  --max-image-edge <pixels|native>\n",
+    "  --no-downsample                Keep native screenshot dimensions.\n",
+    "  -h, --help                     Show this help.\n",
+    "\n",
+    "Safety:\n",
+    "  Every step, text payload, screen mapping, coordinate, and policy limit is validated before\n",
+    "  the first live action. Redacted recordings cannot be executed.\n",
 );
 
 const CLEAR_HELP: &str = concat!(
@@ -949,6 +1375,8 @@ mod tests {
         assert!(help.contains(
             "https://github.com/BrunoV21/FerrisGrid-CLI/blob/main/docs/official/agents.md"
         ));
+        assert!(help.contains("ferrisgrid record"));
+        assert!(help.contains("ferrisgrid replay"));
     }
 
     #[test]
@@ -967,11 +1395,45 @@ mod tests {
     fn parses_help_topics() {
         assert_eq!(parse_help_topic("observe").unwrap(), HelpTopic::Observe);
         assert_eq!(parse_help_topic("act").unwrap(), HelpTopic::Act);
+        assert_eq!(parse_help_topic("record").unwrap(), HelpTopic::Record);
+        assert_eq!(parse_help_topic("replay").unwrap(), HelpTopic::Replay);
         assert_eq!(parse_help_topic("--help").unwrap(), HelpTopic::Root);
 
         let error = parse_help_topic("missing").unwrap_err();
         assert_eq!(error.kind, ferrisgrid_core::ErrorKind::Protocol);
         assert!(error.message.contains("unknown help topic"));
+    }
+
+    #[test]
+    fn record_defaults_to_redacted_smart_capture() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        clear_option_env();
+        let options = RecordCommandOptions::parse(&[]).unwrap();
+        assert_eq!(options.text_mode, TextMode::Redacted);
+        assert_eq!(options.fps, 4);
+        assert_eq!(options.settle_ms, 300);
+        assert_eq!(options.countdown_ms, 3000);
+        assert!(help_text(HelpTopic::Record).contains("does not redact text visible"));
+    }
+
+    #[test]
+    fn replay_is_dry_run_by_default_and_parses_screen_mapping() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        clear_option_env();
+        let options = ReplayCommandOptions::parse(&[
+            "demo".to_string(),
+            "--map-screen".to_string(),
+            "screen-2=screen-1".to_string(),
+        ])
+        .unwrap();
+        assert!(!options.execute);
+        assert_eq!(options.delay_ms, 300);
+        assert_eq!(options.max_actions, 25);
+        assert_eq!(
+            options.screen_map.get("screen-2").map(String::as_str),
+            Some("screen-1")
+        );
+        assert!(help_text(HelpTopic::Replay).contains("Without it, replay is read-only"));
     }
 
     #[test]
