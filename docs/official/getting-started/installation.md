@@ -35,6 +35,20 @@ Run the CLI through Cargo:
 cargo run -q -p ferrisgrid-cli -- doctor
 ```
 
+## macOS permissions
+
+Normal native capture and demonstration recording require Screen Recording access.
+Native input and the global demonstration event tap require Accessibility/Input
+Monitoring access. Grant the terminal or agent application running FerrisGrid access
+in **System Settings > Privacy & Security**, restart that application, then run:
+
+```bash
+ferrisgrid doctor
+```
+
+The native `record` command requires macOS 13 or newer. FerrisGrid prints a three-second
+countdown by default so you can focus the application you want to demonstrate.
+
 ## Windows
 
 FerrisGrid supports Windows 10/11 x64 from an interactive desktop session. The default `native` backend selects the Win32 capture and input implementation; `native-windows`, `windows`, and `win32` select it explicitly.

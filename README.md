@@ -31,8 +31,10 @@ FerrisGrid captures the current screen, maps it to deterministic coordinates, re
 
 - **Eyes plus a map:** screenshots become coordinate-backed observations an LLM can reason over.
 - **Single-step by default:** every call performs one observation or one action.
-- **Deterministic coordinates:** screenshots map cleanly back to native screen pixels.
+- **Deterministic coordinates:** screenshots map cleanly back to OS desktop coordinates, including scaled displays.
 - **Local-first traces:** screenshots, metadata, action requests, and results stay under `.ferrisgrid/`.
+- **Human demonstrations:** on macOS, record semantic input with smart screenshots and turn it into reusable Markdown actions.
+- **Guarded replay:** validate an entire sequence without input by default; live replay requires `--execute`.
 - **Cross-platform shape:** the agent-facing protocol is the same across macOS, Linux, and Windows where the platform allows it.
 - **Container-friendly:** run a Linux desktop workspace in Docker and watch it through noVNC while the agent works away from your main screen.
 
@@ -60,6 +62,16 @@ Windows 10/11 x64 is supported natively. `ferrisgrid observe`, the complete mous
 
 Use `--backend native-windows` (aliases: `windows`, `win32`) to select it explicitly. The default `native` backend selects Windows automatically.
 
+### macOS demonstration recording
+
+On macOS 13 or newer, grant Screen Recording and Accessibility/Input Monitoring access
+to the terminal or agent application running FerrisGrid, restart it, and confirm the
+recording readiness line:
+
+```bash
+ferrisgrid doctor
+```
+
 ## Quick Start
 
 Capture the current screen:
@@ -84,6 +96,30 @@ EOF
 
 ferrisgrid act --file .ferrisgrid/action.md
 ```
+
+Record a human workflow with semantic checkpoints:
+
+```bash
+ferrisgrid record --session onboarding-demo
+```
+
+FerrisGrid groups printable typing and captures around clicks, completed drags,
+debounced scrolling, Enter/navigation keys, and hotkeys instead of taking one image per
+character. Stop with `Control+Option+Command+Escape` or Ctrl+C; pause/resume with
+`Control+Option+Command+P`.
+
+Typed text is redacted by default. Redaction protects the action log, not text visible
+in screenshots. To create an intentionally replayable text sequence, opt in:
+
+```bash
+ferrisgrid record --session form-demo --text-mode plain
+ferrisgrid replay .ferrisgrid/sessions/form-demo
+ferrisgrid replay .ferrisgrid/sessions/form-demo --execute
+```
+
+The first replay command performs full read-only preflight. The second emits OS input
+only after all actions, coordinates, screen mappings, and limits validate. Native input
+recording is currently macOS-only; cross-screen drags are not recorded.
 
 ## Development from source
 
@@ -200,7 +236,9 @@ The docs use a terminal-brutalist **Terminal Violet** palette: black surfaces, v
 
 ## Project Status
 
-FerrisGrid is early, local-first infrastructure for agent-facing visual control. The current focus is reliable observe/act behavior, local traces, recap output, and containerized Linux workspaces.
+FerrisGrid is early, local-first infrastructure for agent-facing visual control and
+human-authored demonstrations. The current focus is reliable observe/act behavior,
+macOS record/replay, local traces, recap output, and containerized Linux workspaces.
 
 ## License
 

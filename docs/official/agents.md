@@ -37,6 +37,8 @@ ferrisgrid doctor
 
 - [observe](https://raw.githubusercontent.com/BrunoV21/FerrisGrid-CLI/main/docs/official/commands/observe.md)
 - [act](https://raw.githubusercontent.com/BrunoV21/FerrisGrid-CLI/main/docs/official/commands/act.md)
+- [record](https://raw.githubusercontent.com/BrunoV21/FerrisGrid-CLI/main/docs/official/commands/record.md)
+- [replay](https://raw.githubusercontent.com/BrunoV21/FerrisGrid-CLI/main/docs/official/commands/replay.md)
 - [doctor](https://raw.githubusercontent.com/BrunoV21/FerrisGrid-CLI/main/docs/official/commands/doctor.md)
 - [recap](https://raw.githubusercontent.com/BrunoV21/FerrisGrid-CLI/main/docs/official/commands/recap.md)
 - [clear](https://raw.githubusercontent.com/BrunoV21/FerrisGrid-CLI/main/docs/official/commands/clear.md)
@@ -70,6 +72,8 @@ ferrisgrid doctor
 ## Important Runtime Contract
 
 - FerrisGrid is single-step. Alternate `observe` and one `act`.
+- `record` and `replay` are human demonstration-authoring commands, not the normal agent loop.
+- `replay` is read-only unless the caller explicitly passes `--execute`.
 - Inspect screenshot paths returned by `observe` and `act`.
 - Use normalized coordinates from `0..1000`.
 - Include `screen_id` for pointer actions on multi-screen systems, or pass `act --screen-id <id>`.

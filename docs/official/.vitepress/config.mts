@@ -42,6 +42,8 @@ export default defineConfig({
           { text: 'Overview', link: '/commands/' },
           { text: 'observe', link: '/commands/observe' },
           { text: 'act', link: '/commands/act' },
+          { text: 'record', link: '/commands/record' },
+          { text: 'replay', link: '/commands/replay' },
           { text: 'doctor', link: '/commands/doctor' },
           { text: 'recap', link: '/commands/recap' },
           { text: 'clear', link: '/commands/clear' }

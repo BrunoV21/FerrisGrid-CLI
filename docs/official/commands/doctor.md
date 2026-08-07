@@ -18,10 +18,16 @@ It prints:
 - OS
 - capture backend status
 - input backend capabilities
+- demonstration-recording readiness
 - output directory
 - discovered screens
 - ffmpeg availability
 
 Run this before an agent workflow, especially after changing permissions, backends, displays, or Docker workspace settings.
+
+On macOS, the recording line checks the native demonstration recorder, including
+Screen Recording and Accessibility/Input Monitoring access. `record` requires macOS
+13 or newer. If macOS grants a permission while FerrisGrid is running, restart the
+terminal or calling agent before checking again.
 
 On Windows, `doctor --backend native-windows` verifies display discovery and reports mouse/keyboard capability. Run it from an unlocked interactive desktop. Input to an elevated application or the secure desktop can still be rejected at execution time by Windows integrity isolation.

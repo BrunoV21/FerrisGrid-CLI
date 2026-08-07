@@ -28,8 +28,10 @@ hero:
 features:
   - title: "Single-step execution"
     details: "Every invocation observes once or executes one validated action, then exits. The agent owns the reasoning loop."
+  - title: "Human demonstrations"
+    details: "On macOS, record semantic input with smart checkpoints, then validate or explicitly replay the resulting Markdown sequence."
   - title: "Coordinate-first screenshots"
-    details: "Screenshots include deterministic metadata so image-space choices map back to native screen coordinates."
+    details: "Screenshots include deterministic metadata so image-space choices map back to OS desktop coordinates across scaled displays."
   - title: "Eyes plus a map"
     details: "FerrisGrid turns desktop pixels into structured observations an LLM can reason over without hiding the underlying screenshot."
   - title: "Local traces"
@@ -88,6 +90,18 @@ The agent reads the returned screenshot path and coordinate metadata, decides on
 ```bash
 ferrisgrid act --file .ferrisgrid/action.md
 ```
+
+## Record a demonstration
+
+On macOS 13 or newer:
+
+```bash
+ferrisgrid record --session onboarding-demo
+ferrisgrid replay .ferrisgrid/sessions/onboarding-demo
+```
+
+Replay is a read-only validation by default. Record with `--text-mode plain` and add
+`--execute` only when you intentionally want typed content stored and OS input emitted.
 
 ## Development from source
 

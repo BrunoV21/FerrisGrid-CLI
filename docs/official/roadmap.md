@@ -8,12 +8,15 @@ FerrisGrid is early infrastructure. The immediate path is reliability before bre
 - Linux Docker workspace support.
 - Local trace stability.
 - Recap output for human review.
+- macOS human demonstration recording and guarded sequence replay.
 - Cross-platform backend parity.
 
 ## Next
 
 - Stronger policy controls for input execution.
 - More complete multi-screen behavior.
+- Native human-input recorders for Windows and Linux.
+- Cross-screen drag recording and richer gesture semantics.
 - Better grid overlays and coordinate diagnostics.
 - Packaged installs for agent runtimes.
 - Expanded examples for Codex, Cursor, Claude Code, and other local tool callers.
