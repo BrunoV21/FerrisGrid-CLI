@@ -29,7 +29,8 @@ FerrisGrid should feel like a lightweight single-step visual control primitive t
 
 1. Take the fastest useful screenshot for all visible screens unless a `screen_id` is supplied.
 2. Downscale or compress each screenshot to the minimum acceptable quality for the agent runtime.
-3. Overlay or define a coordinate grid that maps cleanly back to native screen pixels for each screen.
+3. Overlay or define a coordinate grid that maps cleanly back to each screen's OS
+   desktop coordinate space while preserving native capture dimensions as metadata.
 4. Return compact Markdown containing local screenshot paths, per-screen coordinate metadata, and allowed actions to the agent.
 5. Receive one constrained action request from the agent.
 6. Validate the action, including its target screen.
@@ -241,17 +242,18 @@ Acceptance criteria:
 - A compact Markdown session manifest is written.
 - The session can be recapped later from local files without sending data to an LLM.
 
-### 7.6 Human demonstration recording
+### 7.6 Human demonstration recording and replay
 
-As a human, I want a future `ferrisgrid record` command that records my screen and the actions I personally take so FerrisGrid can generate a reusable sequence log.
+As a human, I want `ferrisgrid record` to record my screen and the actions I personally take so FerrisGrid can generate a reusable sequence log.
 
 Acceptance criteria:
 
-- Human can run `ferrisgrid record` in a roadmap release as a demonstration/authoring command.
+- Human can run `ferrisgrid record` on macOS 13 or newer as a demonstration/authoring command.
 - FerrisGrid records user actions such as click, scroll, drag, keypress, hotkey, and text input.
 - FerrisGrid captures the screen around each user action and stores the action type, coordinates, target `screen_id`, timestamp, and relevant input payload.
 - FerrisGrid writes a compact Markdown action sequence log into the Ferris session directory.
-- The sequence log is reproducible by default through a replay/reproduce capability, subject to policy gates.
+- `ferrisgrid replay` validates the sequence without emitting input by default.
+- Live sequence reproduction requires explicit `--execute`, complete preflight validation, and existing policy gates.
 - `record` is not the normal way an agent executes a task; it is for creating reusable demonstrations.
 
 ### 7.7 Human recap and video export
@@ -300,15 +302,18 @@ FerrisGrid should follow these principles:
 
 ## 9. Key product concepts
 
-### 9.1 Native screen space
+### 9.1 Desktop and native screen space
 
-The actual coordinate space reported by the operating system for a screen or virtual desktop.
+The desktop coordinate space used for input may differ from native capture pixels on a
+scaled display. FerrisGrid records both explicitly.
 
 Example:
 
 ```md
 native_width: 3024
 native_height: 1964
+logical_width: 1512
+logical_height: 982
 origin_x: 0
 origin_y: 0
 scale_factor: 2.0
@@ -341,7 +346,7 @@ Why normalized coordinates:
 - They reduce token overhead.
 - They are independent of screen resolution.
 - They make prompts more consistent across machines.
-- They can still be mapped precisely back to native pixels.
+- They can still be mapped precisely back to OS desktop coordinates.
 
 ### 9.4 Action space
 
@@ -393,21 +398,20 @@ ferrisgrid act
 ferrisgrid doctor
 ```
 
-Human-facing command:
+Human-facing commands:
 
 ```bash
 ferrisgrid recap <session_path>
-```
-
-Roadmap human authoring command:
-
-```bash
 ferrisgrid record
+ferrisgrid replay <session-or-sequence>
 ```
 
-`ferrisgrid recap` is the only command expected in the normal human workflow. It generates a compact Markdown recap and, when requested, a video or animated artifact from screenshots already captured locally.
+`ferrisgrid recap` generates review artifacts from screenshots already captured
+locally. `record` and `replay` are human demonstration-authoring commands, separate
+from the normal agent execution loop.
 
-Setup and diagnostics commands such as `doctor` may be used during installation or debugging, but they are not part of the normal task execution workflow. `record` is a future demonstration-authoring command, not a task execution command.
+Setup and diagnostics commands such as `doctor` may be used during installation or
+debugging, but they are not part of the normal task execution workflow.
 
 ### 10.1.1 Project initialization
 
@@ -544,7 +548,7 @@ Modes:
 - event-based: capture before and after selected actions.
 - fixed FPS: optional post-MVP.
 
-### 10.1.6 Roadmap `ferrisgrid record`
+### 10.1.6 `ferrisgrid record` and `ferrisgrid replay`
 
 Records a human demonstration and writes a reproducible action sequence.
 
@@ -556,6 +560,17 @@ Expected behavior:
 - Writes `recording.md` and `sequence.md` into a FerrisGrid session directory.
 - Produces a sequence log that FerrisGrid can later reproduce step by step, subject to policy gates.
 - Does not invoke an LLM and does not replace agent-controlled single-step execution.
+- Groups printable typing and captures screenshots on semantic boundaries such as
+  clicks, drag completion, scroll completion, Enter, navigation keys, and hotkeys.
+- Defaults to redacted typed-text payloads; fully replayable text requires an explicit
+  `--text-mode plain` recording.
+- Keeps rolling screen frames in memory and persists pre/post frames only for selected
+  checkpoints rather than writing fixed-FPS video.
+- `ferrisgrid replay <session-or-sequence>` is dry-run by default and requires
+  `--execute` for live OS input.
+- Replay preflights every action, display mapping, coordinate, policy limit, and selected
+  backend input capability before emitting the first live action.
+- Replay uses a configurable fixed delay between actions and writes a separate session.
 
 ### 10.1.7 `ferrisgrid recap <session_path>`
 
@@ -741,7 +756,7 @@ FerrisGrid should support two coordinate strategies:
 
 #### Visual overlay grid
 
-Default mode. FerrisGrid renders grid lines and coordinate axes onto the saved screenshot and returns compact Markdown metadata that maps coordinates back to native pixels.
+Default mode. FerrisGrid renders grid lines and coordinate axes onto the saved screenshot and returns compact Markdown metadata that maps coordinates back to OS desktop coordinates.
 
 Pros:
 
@@ -756,7 +771,7 @@ Cons:
 
 #### Metadata-only grid
 
-Optional mode. The agent receives coordinate instructions in compact Markdown, and metadata maps coordinates back to native pixels without stamping the image.
+Optional mode. The agent receives coordinate instructions in compact Markdown, and metadata maps coordinates back to OS desktop coordinates without stamping the image.
 
 Pros:
 
@@ -809,15 +824,15 @@ agent_y: 0..1000
 Mapping to agent-visible image pixels:
 
 ```text
-image_x = round((agent_x / 1000) * image_width)
-image_y = round((agent_y / 1000) * image_height)
+image_x = round((agent_x / 1000) * (image_width - 1))
+image_y = round((agent_y / 1000) * (image_height - 1))
 ```
 
-Mapping to native pixels:
+Mapping to OS desktop coordinates:
 
 ```text
-native_x = origin_x + round((image_x / image_width) * native_width)
-native_y = origin_y + round((image_y / image_height) * native_height)
+desktop_x = origin_x + round((agent_x / 1000) * logical_width)
+desktop_y = origin_y + round((agent_y / 1000) * logical_height)
 ```
 
 FerrisGrid must clamp coordinates to valid screen bounds.
@@ -844,6 +859,8 @@ Required metadata:
 - name: Built-in Display
 - origin_x: 0
 - origin_y: 0
+- logical_width: 1512
+- logical_height: 982
 - native_width: 3024
 - native_height: 1964
 - scale_factor: 2.0
@@ -1360,14 +1377,16 @@ demonstration      capture human actions for reproducible sequence logs
 time-based         capture at fixed FPS
 ```
 
-MVP:
+Implemented scope:
 
 - step-based,
-- event-based.
+- event-based,
+- macOS demonstration recording through `ferrisgrid record`,
+- policy-gated sequence reproduction through `ferrisgrid replay`,
 
 Post-MVP:
 
-- demonstration recording through `ferrisgrid record`,
+- Windows and Linux native demonstration recorders,
 - fixed FPS recording,
 - cursor path overlay,
 - action labels overlay,
@@ -1393,7 +1412,7 @@ FerrisGrid should log:
 
 ### 10.7.3 Demonstration recording and reproduction
 
-The roadmap `ferrisgrid record` command must create reproducible sequence logs from human-performed workflows.
+The `ferrisgrid record` command creates reproducible sequence logs from human-performed workflows.
 
 Sequence log requirements:
 
@@ -1402,7 +1421,12 @@ Sequence log requirements:
 - Include text input payloads with redaction controls.
 - Use the same coordinate mapping and action vocabulary as agent `act` calls.
 - Save the sequence under `.ferrisgrid/sessions/<session_id>/sequences/sequence.md`.
-- Be reproducible by default through a future sequence reproduction command or API.
+- Be reproducible through `ferrisgrid replay` after complete preflight validation.
+- Keep action numbering independent from frame numbering so multiple actions may share
+  a visual checkpoint and printable typing need not create frames.
+- Record exact event timestamps for analysis but use a fixed delay for replay.
+- Mark redacted typing and external clipboard dependencies as non-replayable or
+  externally dependent during whole-sequence preflight.
 - Reproduction must remain policy-gated and must not silently bypass safety limits.
 
 ### 10.7.4 Video export
@@ -1523,7 +1547,7 @@ Command Router
  +--> Metrics/Logs ------> Local Files
 ```
 
-## 11.2 Suggested Rust crate structure
+## 11.2 Rust crate structure
 
 ```text
 crates/
@@ -1531,7 +1555,6 @@ crates/
   ferrisgrid-core/
   ferrisgrid-capture/
   ferrisgrid-input/
-  ferrisgrid-agent/
   ferrisgrid-record/
   ferrisgrid-export/
 ```
@@ -1560,6 +1583,8 @@ Responsibilities:
 - shared data types,
 - config model,
 - errors.
+- compact Markdown action parsing and rendering,
+- action policy validation and coordinate mapping.
 
 ### 11.2.3 `ferrisgrid-capture`
 
@@ -1591,27 +1616,18 @@ Potential backend candidates to evaluate:
 - native APIs where necessary
 - platform-specific fallback modules
 
-### 11.2.5 `ferrisgrid-agent`
+### 11.2.5 `ferrisgrid-record`
 
 Responsibilities:
 
-- compact Markdown protocol parsing,
-- action block parsing,
-- ambiguity errors for missing `screen_id`,
-- retry policy.
+- passive native event observation,
+- raw-event to semantic-action reduction,
+- rolling capture and smart checkpoint persistence,
+- recording manifests and human demonstration action traces,
+- sequence parsing and serialization,
+- whole-sequence preflight and policy-gated replay orchestration.
 
-### 11.2.6 `ferrisgrid-record`
-
-Responsibilities:
-
-- session manifest,
-- event log,
-- frame storage,
-- action traces,
-- human demonstration sequence logs,
-- metrics.
-
-### 11.2.7 `ferrisgrid-export`
+### 11.2.6 `ferrisgrid-export`
 
 Responsibilities:
 
@@ -2051,15 +2067,15 @@ Coordinate mapping must use golden fixtures.
 Example fixture:
 
 ```md
-native_width: 3024
-native_height: 1964
+logical_width: 1512
+logical_height: 982
 image_width: 1512
 image_height: 982
 screen_id: screen-1
 agent_x: 500
 agent_y: 500
-expected_native_x: 1512
-expected_native_y: 982
+expected_desktop_x: 756
+expected_desktop_y: 491
 ```
 
 ## 19.5 Manual QA scenarios
@@ -2123,27 +2139,28 @@ expected_native_y: 982
 6. Complex policy engine
 7. Native package installers
 8. Plugin system
-9. Human demonstration `record`
-10. Sequence reproduction
+9. Native Windows and Linux demonstration recorders
+10. Cross-screen drag recording
 
 ---
 
 ## 21. Post-MVP roadmap
 
-## 21.1 Version 0.2
+## 21.1 Delivered foundation
 
 - Robust multi-screen support beyond MVP edge cases.
 - Visual grid overlay improvements.
 - Richer recap output in terminal.
 - Better typed-text redaction.
 - Video export using FFmpeg.
-- Human demonstration `ferrisgrid record`.
-- Reproducible `sequence.md` logs from recorded user actions.
+- macOS human demonstration `ferrisgrid record`.
+- Reproducible `sequence.md` logs and policy-gated `ferrisgrid replay`.
 
-## 21.2 Version 0.3
+## 21.2 Next recording work
 
-- Sequence reproduction from recorded action logs.
 - Fixed-FPS recording.
+- Native Windows and Linux demonstration recorders.
+- Cross-screen drag and richer gesture recording.
 - Cursor/action overlays.
 - Better Wayland support.
 - Benchmark command.
@@ -2201,7 +2218,8 @@ FerrisGrid is ready for first public release when:
 7. How should FerrisGrid detect potentially destructive actions in an agent-runtime-agnostic way?
 8. Should session directories be human-readable timestamp IDs or opaque UUIDs?
 9. What is the minimum supported Rust version?
-10. What command/API should reproduce a `sequence.md` file created by `ferrisgrid record`?
+10. What additional policy declarations should portable sequences carry beyond the
+    current action limit, screen mapping, and action validation?
 
 ---
 
@@ -2219,7 +2237,7 @@ FerrisGrid is ready for first public release when:
 | Capture latency too high | Medium | Benchmarking, downscale defaults, backend profiling |
 | Crate limitations across platforms | Medium | Swappable backend architecture, native fallback modules |
 | Session storage grows too quickly | Medium | Storage modes, retention controls, compression |
-| Human expects to drive task execution directly | Medium | Position product clearly as an agent-facing local tool with only recap/video export as the normal human command |
+| Human confuses demonstration replay with the agent loop | Medium | Keep record/replay explicitly human-facing, dry-run replay by default, and preserve the single-step agent protocol |
 
 ---
 
@@ -2356,4 +2374,5 @@ The MVP should be intentionally narrow:
 - dry-run and policy gates,
 - `doctor` for platform readiness.
 
-Once the single-step observe/act path is reliable, expand into richer recording, video export, demonstration recording, sequence reproduction, and more advanced policy controls.
+Continue hardening the single-step observe/act path while expanding native recorder
+coverage, video export, richer sequence semantics, and more advanced policy controls.

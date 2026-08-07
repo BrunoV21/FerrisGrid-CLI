@@ -134,7 +134,7 @@ Outputs:
 - optional video artifact such as `export/session.mp4`
 - optional GIF or frame sequence fallback
 
-### 4.3 Roadmap Command
+### 4.3 Human Demonstration Commands
 
 #### `ferrisgrid record`
 
@@ -148,11 +148,24 @@ Expected output:
 
 This is for authoring reproducible workflows. It is not the normal agent execution path.
 
+The first native recorder targets macOS 13 and newer. It observes semantic mouse and
+keyboard actions, keeps low-rate screen frames in memory, and persists frames only at
+meaningful checkpoints. Printable typing is grouped and does not create one screenshot
+per character.
+
+#### `ferrisgrid replay <session-or-sequence>`
+
+Validates a recorded sequence without emitting input by default. `--execute` opts into
+policy-gated multi-step input execution and writes a separate replay session. Replay
+uses fixed inter-action timing rather than reproducing human thinking pauses. Every
+action, display mapping, coordinate, policy limit, and backend input capability is
+preflighted before the first live action.
+
 ---
 
 ## 5. Internal Crate Architecture
 
-Recommended Rust workspace layout:
+Current Rust workspace layout:
 
 ```text
 crates/
@@ -160,26 +173,26 @@ crates/
   ferrisgrid-core/
   ferrisgrid-capture/
   ferrisgrid-input/
-  ferrisgrid-agent/
   ferrisgrid-record/
   ferrisgrid-export/
 ```
 
-Recommended crate dependency direction:
+Crate dependency direction:
 
 ```mermaid
 flowchart LR
   cli[ferrisgrid-cli] --> core[ferrisgrid-core]
-  core --> capture[ferrisgrid-capture]
-  core --> input[ferrisgrid-input]
-  core --> agent[ferrisgrid-agent]
-  core --> record[ferrisgrid-record]
-  core --> export[ferrisgrid-export]
-  record --> capture
-  export --> record
+  capture[ferrisgrid-capture] --> core[ferrisgrid-core]
+  input[ferrisgrid-input] --> core
+  record[ferrisgrid-record] --> core
+  export[ferrisgrid-export] --> core
+  cli --> capture
+  cli --> input
+  cli --> record
+  cli --> export
 
   classDef boundary fill:#f7f7f7,stroke:#777,color:#222;
-  class cli,core,capture,input,agent,record,export boundary;
+  class cli,core,capture,input,record,export boundary;
 ```
 
 ### 5.1 `ferrisgrid-cli`
@@ -202,6 +215,7 @@ Responsibilities:
 - Config model.
 - Error model.
 - Policy gate coordination.
+- Compact Markdown action parsing and rendering.
 
 The core should expose operations similar to:
 
@@ -226,7 +240,9 @@ Responsibilities:
 
 Important invariant:
 
-Every captured image must have metadata sufficient to map agent coordinates back to native screen coordinates.
+Every captured image must have metadata sufficient to map agent coordinates back to
+the operating system's desktop coordinate space. Logical desktop dimensions and native
+capture dimensions must remain distinct on scaled displays.
 
 ### 5.4 `ferrisgrid-input`
 
@@ -240,29 +256,21 @@ Responsibilities:
 
 This crate must never execute an action that has not passed core validation and policy checks.
 
-### 5.5 `ferrisgrid-agent`
+### 5.5 `ferrisgrid-record`
 
 Responsibilities:
 
-- Parse compact Markdown action blocks.
-- Validate protocol shape before semantic validation.
-- Normalize action fields into internal action types.
-- Produce compact Markdown ambiguity and parse errors.
+- Passive platform input observation.
+- Raw-event to semantic-action reduction.
+- Smart screenshot checkpoint scheduling.
+- Human demonstration action traces.
+- Sequence parsing, validation, and policy-gated replay orchestration.
 
-This crate does not call LLM providers.
+The event callback must never capture images or write files. It pushes timestamped
+events into a bounded queue and returns immediately; workers perform reduction,
+capture coordination, and storage.
 
-### 5.6 `ferrisgrid-record`
-
-Responsibilities:
-
-- Session manifest.
-- Events log.
-- Metrics log.
-- Action traces.
-- Human demonstration recording.
-- Reproducible sequence logs.
-
-### 5.7 `ferrisgrid-export`
+### 5.6 `ferrisgrid-export`
 
 Responsibilities:
 
@@ -369,6 +377,8 @@ Core fields:
 - `is_primary`
 - `origin_x`
 - `origin_y`
+- `logical_width`
+- `logical_height`
 - `native_width`
 - `native_height`
 - `scale_factor`
@@ -464,10 +474,10 @@ agent_y: 0..1000
 Mapping:
 
 ```text
-image_x = round((agent_x / 1000) * image_width)
-image_y = round((agent_y / 1000) * image_height)
-native_x = screen_origin_x + round((image_x / image_width) * native_width)
-native_y = screen_origin_y + round((image_y / image_height) * native_height)
+image_x = round((agent_x / 1000) * (image_width - 1))
+image_y = round((agent_y / 1000) * (image_height - 1))
+desktop_x = screen_origin_x + round((agent_x / 1000) * logical_width)
+desktop_y = screen_origin_y + round((agent_y / 1000) * logical_height)
 ```
 
 Coordinate conversion path:
@@ -475,10 +485,10 @@ Coordinate conversion path:
 ```mermaid
 flowchart LR
   agent[Agent coordinates<br/>0..1000 screen-local] --> image[Captured image coordinates]
-  image --> native[Native screen coordinates]
-  native --> os[OS input backend]
-  metadata[Screen metadata<br/>origin, image size, native size, scale factor] --> image
-  metadata --> native
+  agent --> desktop[OS desktop coordinates]
+  desktop --> os[OS input backend]
+  metadata[Screen metadata<br/>origin, logical size, image size, native size, scale factor] --> image
+  metadata --> desktop
 ```
 
 Validation rules:
@@ -683,7 +693,7 @@ docs/
 - FerrisGrid records actions and coordinates
 - screenshots are captured around actions
 - `sequence.md` is created
-- future reproduction uses the same action protocol as `act`
+- reproduction through `ferrisgrid replay` uses the same action protocol as `act`
 
 ---
 
@@ -726,4 +736,4 @@ All FerrisGrid docs should follow these rules:
 - Coordinate mapping has golden tests.
 - Platform permission failures are actionable.
 - Human `recap` can read existing session files without an LLM.
-- Roadmap `record` has a documented sequence format before implementation starts.
+- `record` and `replay` have a documented sequence format and safety contract.
